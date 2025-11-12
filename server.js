@@ -175,7 +175,7 @@ async function autoFetchJob() {
   console.log('\n🤖 AUTO-FETCH STARTED');
   console.log('Time:', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
   
-  const symbols = ['NIFTY', 'BANKNIFTY'];
+const symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
   
   for (const symbol of symbols) {
     try {
