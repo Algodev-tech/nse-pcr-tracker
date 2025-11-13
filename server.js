@@ -10,6 +10,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(compression());
 app.use(express.json());
+// Serve static files (dashboard)
+app.use(express.static('public'));
+
 
 let sessionData = {
   cookies: null,
