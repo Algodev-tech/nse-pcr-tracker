@@ -175,8 +175,7 @@ async function autoFetchJob() {
   console.log('\n🤖 AUTO-FETCH STARTED');
   console.log('Time:', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
   
-  // ✅ UPDATED: Now includes FINNIFTY and MIDCPNIFTY
-  const symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
+  const symbols = ['NIFTY', 'BANKNIFTY'];
   
   for (const symbol of symbols) {
     try {
@@ -213,13 +212,11 @@ app.get('/', (req, res) => {
     status: '🟢 LIVE',
     service: 'NSE PCR Cloud Tracker',
     marketOpen: isMarketOpen(),
-    symbols: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'], // ✅ UPDATED
     info: 'Auto-fetches data every 5 minutes during market hours (9:15-15:30 IST)',
     endpoints: {
       health: 'GET /health',
       pcr: 'GET /api/pcr/:symbol',
-      trigger: 'POST /api/trigger',
-      allSymbols: 'GET /api/pcr/all'
+      trigger: 'POST /api/trigger'
     }
   });
 });
@@ -233,17 +230,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-// ✅ UPDATED: Now includes all 4 symbols
 app.get('/api/pcr/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
-  const validSymbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
+  const validSymbols = ['NIFTY', 'BANKNIFTY'];
   
   if (!validSymbols.includes(symbol)) {
-    return res.status(400).json({ 
-      error: 'Invalid symbol', 
-      validSymbols,
-      example: '/api/pcr/NIFTY'
-    });
+    return res.status(400).json({ error: 'Invalid symbol', validSymbols });
   }
   
   try {
@@ -265,46 +257,10 @@ app.get('/api/pcr/:symbol', async (req, res) => {
   }
 });
 
-// ✅ NEW: Get all symbols at once
-app.get('/api/pcr/all', async (req, res) => {
-  const symbols = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
-  const results = [];
-  
-  for (const symbol of symbols) {
-    try {
-      const data = await fetchOptionChain(symbol);
-      const pcr = calculatePCR(data);
-      results.push({
-        success: true,
-        symbol,
-        ...pcr
-      });
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    } catch (error) {
-      results.push({
-        success: false,
-        symbol,
-        error: error.message
-      });
-    }
-  }
-  
-  res.json({
-    success: true,
-    count: results.length,
-    data: results,
-    fetchedAt: new Date().toISOString()
-  });
-});
-
 app.post('/api/trigger', async (req, res) => {
   try {
     await autoFetchJob();
-    res.json({ 
-      success: true, 
-      message: 'Manual fetch completed for all symbols',
-      symbols: ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY']
-    });
+    res.json({ success: true, message: 'Manual fetch completed' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -312,11 +268,10 @@ app.post('/api/trigger', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log('\n' + '='.repeat(70));
-  console.log('🚀 NSE PCR CLOUD TRACKER - ENHANCED');
+  console.log('🚀 NSE PCR CLOUD TRACKER');
   console.log('='.repeat(70));
   console.log(`📍 Running on port: ${PORT}`);
   console.log(`🔴 Market status: ${isMarketOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
-  console.log(`📊 Tracking: NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY`);
   console.log(`⏰ Auto-fetch: Every 5 min (only during market hours)`);
   console.log('='.repeat(70) + '\n');
 });
