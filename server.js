@@ -10,7 +10,6 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(compression());
 app.use(express.json());
-// Serve static files (dashboard)
 app.use(express.static('public'));
 
 let sessionData = {
@@ -19,7 +18,12 @@ let sessionData = {
   ttl: 3 * 60 * 1000
 };
 
-const GOOGLE_SHEETS_WEBHOOK = process.env.SHEETS_WEBHOOK || null;
+// ========== TODAY'S PCR HISTORY (IN-MEMORY, SHARED) ==========
+let todayHistory = {
+  date: null,
+  NIFTY: [],
+  BANKNIFTY: []
+};
 
 async function initializeNSESession(forceRefresh = false) {
   const now = Date.now();
@@ -134,38 +138,6 @@ function calculatePCR(data) {
   };
 }
 
-// ---------- SHEETS PUSH (NOW DISABLED – LEFT FOR REFERENCE) ----------
-
-async function pushToGoogleSheets(symbol, pcrData) {
-  // This function is kept for reference but effectively disabled.
-  // Apps Script now pulls data from /api/pcr instead of this server pushing.
-  
-  if (!GOOGLE_SHEETS_WEBHOOK) {
-    console.log('⚠️ No Google Sheets webhook set (push disabled, using Apps Script pull)');
-    return false;
-  }
-
-  // If you ever want to re‑enable server‑side push, uncomment this block.
-  /*
-  try {
-    await axios.post(GOOGLE_SHEETS_WEBHOOK, {
-      symbol,
-      ...pcrData,
-      timestamp: new Date().toISOString()
-    });
-    console.log(`✅ Pushed ${symbol} to Google Sheets`);
-    return true;
-  } catch (error) {
-    console.error('❌ Sheets error:', error.message);
-    return false;
-  }
-  */
-
-  return false;
-}
-
-// --------------------------------------------------------------------
-
 function isMarketOpen() {
   const now = new Date();
   const hour = now.getUTCHours() + 5;
@@ -180,7 +152,34 @@ function isMarketOpen() {
   return isWeekday && currentMinutes >= marketOpen && currentMinutes <= marketClose;
 }
 
+function getTodayDateKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+}
+
+function shouldClearData() {
+  const now = new Date();
+  const hour = now.getUTCHours() + 5;
+  const minute = now.getUTCMinutes() + 30;
+  const currentMinutes = hour * 60 + minute;
+  return currentMinutes >= 9*60 && currentMinutes < 9*60+15; // 09:00-09:15
+}
+
+function checkAndResetDaily() {
+  const today = getTodayDateKey();
+  if (todayHistory.date !== today || shouldClearData()) {
+    console.log('🔄 Clearing old data, starting fresh for', today);
+    todayHistory = {
+      date: today,
+      NIFTY: [],
+      BANKNIFTY: []
+    };
+  }
+}
+
 async function autoFetchJob() {
+  checkAndResetDaily();
+  
   if (!isMarketOpen()) {
     console.log('🔴 Market is closed - skipping');
     return;
@@ -200,13 +199,15 @@ async function autoFetchJob() {
       console.log(`   PCR: ${pcr.pcr}`);
       console.log(`   Price: ₹${pcr.underlyingValue.toLocaleString('en-IN')}`);
       
-      // OLD BEHAVIOUR: push to Google Sheets
-      // await pushToGoogleSheets(symbol, pcr);
-
-      // NEW BEHAVIOUR:
-      // Do not push to Sheets here.
-      // Google Apps Script now pulls from /api/pcr/:symbol and writes to the sheet.
-
+      // Add to today's history
+      todayHistory[symbol].push({
+        time: new Date().toISOString(),
+        symbol,
+        ...pcr
+      });
+      
+      console.log(`   ✅ Added to history (${todayHistory[symbol].length} entries)`);
+      
       await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (error) {
       console.error(`❌ ${symbol} failed:`, error.message);
@@ -216,6 +217,7 @@ async function autoFetchJob() {
   console.log('\n✅ AUTO-FETCH COMPLETED\n');
 }
 
+// Run every 5 minutes during market hours
 cron.schedule('*/5 * * * *', () => {
   if (isMarketOpen()) {
     autoFetchJob();
@@ -226,16 +228,23 @@ cron.schedule('*/5 * * * *', () => {
 
 console.log('⏰ Scheduler set up - runs every 5 min during market hours');
 
+// ========== API ENDPOINTS ==========
+
 app.get('/', (req, res) => {
   res.json({
     status: '🟢 LIVE',
     service: 'NSE PCR Cloud Tracker',
     marketOpen: isMarketOpen(),
+    todayEntries: {
+      NIFTY: todayHistory.NIFTY.length,
+      BANKNIFTY: todayHistory.BANKNIFTY.length
+    },
     info: 'Auto-fetches data every 5 minutes during market hours (9:15-15:30 IST)',
     endpoints: {
       health: 'GET /health',
-      pcr: 'GET /api/pcr/:symbol',
-      trigger: 'POST /api/trigger'
+      pcrLive: 'GET /api/pcr/:symbol',
+      pcrHistory: 'GET /api/pcr-history/:symbol',
+      allHistory: 'GET /api/history'
     }
   });
 });
@@ -249,10 +258,15 @@ app.get('/health', (req, res) => {
     status: 'healthy',
     uptime: Math.floor(process.uptime()) + ' seconds',
     marketOpen: isMarketOpen(),
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    historyCount: {
+      NIFTY: todayHistory.NIFTY.length,
+      BANKNIFTY: todayHistory.BANKNIFTY.length
+    }
   });
 });
 
+// Latest live data
 app.get('/api/pcr/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const validSymbols = ['NIFTY', 'BANKNIFTY'];
@@ -280,6 +294,35 @@ app.get('/api/pcr/:symbol', async (req, res) => {
   }
 });
 
+// Today's full history for a symbol
+app.get('/api/pcr-history/:symbol', (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const validSymbols = ['NIFTY', 'BANKNIFTY'];
+  
+  if (!validSymbols.includes(symbol)) {
+    return res.status(400).json({ error: 'Invalid symbol', validSymbols });
+  }
+  
+  res.json({
+    success: true,
+    symbol,
+    date: todayHistory.date,
+    entries: todayHistory[symbol],
+    count: todayHistory[symbol].length
+  });
+});
+
+// All history (both symbols)
+app.get('/api/history', (req, res) => {
+  res.json({
+    success: true,
+    date: todayHistory.date,
+    NIFTY: todayHistory.NIFTY,
+    BANKNIFTY: todayHistory.BANKNIFTY,
+    marketOpen: isMarketOpen()
+  });
+});
+
 app.post('/api/trigger', async (req, res) => {
   try {
     await autoFetchJob();
@@ -291,10 +334,16 @@ app.post('/api/trigger', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log('\n' + '='.repeat(70));
-  console.log('🚀 NSE PCR CLOUD TRACKER');
+  console.log('🚀 NSE PCR CLOUD TRACKER WITH SHARED HISTORY');
   console.log('='.repeat(70));
   console.log(`📍 Running on port: ${PORT}`);
   console.log(`🔴 Market status: ${isMarketOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
   console.log(`⏰ Auto-fetch: Every 5 min (only during market hours)`);
+  console.log(`📊 History entries: NIFTY=${todayHistory.NIFTY.length}, BANKNIFTY=${todayHistory.BANKNIFTY.length}`);
   console.log('='.repeat(70) + '\n');
+  
+  // Run once on startup if market is open
+  if (isMarketOpen()) {
+    setTimeout(autoFetchJob, 5000);
+  }
 });
