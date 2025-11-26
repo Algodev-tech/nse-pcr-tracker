@@ -490,21 +490,30 @@ app.get('/api/pcr/:symbol', async (req, res) => {
   }
 });
 
+// Get all market data with sample fallback
 app.get('/api/market/overview', (req, res) => {
+  let data;
+  
   if (todayHistory.marketOpen && marketData.indices.length > 0) {
-    return res.json({
-      success: true,
-      ...marketData,
-      marketOpen: true,
-      dataType: 'live'
-    });
+    data = { ...marketData, marketOpen: true, dataType: 'live' };
+  } else {
+    data = { ...closingData, marketOpen: false, dataType: 'closing' };
+  }
+  
+  // Fill empty arrays with sample data
+  if (data.gainers.length === 0) {
+    data.gainers = SAMPLE_CLOSING_DATA.gainers;
+  }
+  if (data.losers.length === 0) {
+    data.losers = SAMPLE_CLOSING_DATA.losers;
+  }
+  if (data.mostActive.length === 0) {
+    data.mostActive = SAMPLE_CLOSING_DATA.mostActive;
   }
   
   res.json({
     success: true,
-    ...closingData,
-    marketOpen: false,
-    dataType: 'closing'
+    ...data
   });
 });
 
@@ -526,27 +535,33 @@ app.get('/api/market/indices', (req, res) => {
 
 app.get('/api/market/gainers', (req, res) => {
   const data = todayHistory.marketOpen ? marketData : closingData;
+  const gainers = data.gainers.length > 0 ? data.gainers : SAMPLE_CLOSING_DATA.gainers;
+  
   res.json({
     success: true,
-    gainers: data.gainers,
+    gainers: gainers,
     lastUpdate: data.lastUpdate
   });
 });
 
 app.get('/api/market/losers', (req, res) => {
   const data = todayHistory.marketOpen ? marketData : closingData;
+  const losers = data.losers.length > 0 ? data.losers : SAMPLE_CLOSING_DATA.losers;
+  
   res.json({
     success: true,
-    losers: data.losers,
+    losers: losers,
     lastUpdate: data.lastUpdate
   });
 });
 
 app.get('/api/market/active', (req, res) => {
   const data = todayHistory.marketOpen ? marketData : closingData;
+  const mostActive = data.mostActive.length > 0 ? data.mostActive : SAMPLE_CLOSING_DATA.mostActive;
+  
   res.json({
     success: true,
-    mostActive: data.mostActive,
+    mostActive: mostActive,
     lastUpdate: data.lastUpdate
   });
 });
