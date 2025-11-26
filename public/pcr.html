@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PCR Tracker - Live (Shared)</title>
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0a0e27; --surface: #1a1f3a; --surface-hover: #232a4a;
+      --text: #e8eaf6; --text-sec: #9fa8da; --primary: #2196f3;
+      --success: #4caf50; --danger: #f44336; --warning: #ff9800;
+      --border: #2d3454; --sidebar: 260px; --header: 64px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: linear-gradient(135deg, var(--bg) 0%, #0d1229 100%);
+      color: var(--text); line-height: 1.6;
+    }
+    .header {
+      position: fixed; top: 0; left: 0; right: 0; height: var(--header);
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 24px; z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .header-title {
+      font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 12px;
+    }
+    .header-title .material-icons { color: var(--primary); font-size: 28px; }
+    .header-actions { margin-left: auto; display: flex; gap: 16px; align-items: center; }
+    .status-badge {
+      padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 500;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .status-badge.live { background: rgba(76,175,80,0.15); color: var(--success); border: 1px solid var(--success); }
+    .status-badge.closed { background: rgba(244,67,54,0.15); color: var(--danger); border: 1px solid var(--danger); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    
+    .sidebar {
+      position: fixed; left: 0; top: var(--header); width: var(--sidebar);
+      height: calc(100vh - var(--header)); background: var(--surface);
+      border-right: 1px solid var(--border); padding: 24px 0; overflow-y: auto; z-index: 90;
+    }
+    .sidebar-section { margin-bottom: 32px; }
+    .sidebar-section-title {
+      font-size: 12px; font-weight: 600; text-transform: uppercase;
+      color: var(--text-sec); padding: 0 24px; margin-bottom: 12px;
+    }
+    .sidebar-item {
+      padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+      color: var(--text); cursor: pointer; border-left: 3px solid transparent; transition: all 0.3s;
+    }
+    .sidebar-item:hover { background: var(--surface-hover); border-left-color: var(--primary); }
+    .sidebar-item.active { background: rgba(33,150,243,0.1); border-left-color: var(--primary); color: var(--primary); }
+    
+    .main-content {
+      margin-left: var(--sidebar); margin-top: var(--header); padding: 32px;
+      min-height: calc(100vh - var(--header));
+    }
+    .symbol-tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+    .symbol-tab {
+      padding: 12px 24px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s;
+    }
+    .symbol-tab:hover { background: var(--surface-hover); }
+    .symbol-tab.active { background: var(--primary); border-color: var(--primary); color: white; }
+    
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px; margin-bottom: 32px;
+    }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 24px; transition: all 0.3s;
+    }
+    .stat-card:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+    .stat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .stat-title { font-size: 13px; font-weight: 500; color: var(--text-sec); text-transform: uppercase; }
+    .stat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+    .stat-value { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+    .stat-change { font-size: 14px; display: flex; align-items: center; gap: 4px; }
+    
+    .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 24px; margin-bottom: 32px; }
+    .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+    .chart-title { font-size: 16px; font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+    
+    .data-section {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden; margin-bottom: 32px;
+    }
+    .section-header {
+      padding: 20px 24px; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .section-title { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .refresh-btn {
+      background: var(--primary); color: white; border: none; padding: 8px 16px;
+      border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;
+      font-size: 14px; transition: all 0.3s;
+    }
+    .refresh-btn:hover { background: #1976d2; }
+    
+    .table-container { overflow-x: auto; max-height: 600px; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background: rgba(33,150,243,0.05); position: sticky; top: 0; z-index: 10; }
+    th {
+      padding: 16px; text-align: left; font-size: 13px; font-weight: 600;
+      color: var(--text-sec); text-transform: uppercase; background: var(--surface);
+    }
+    td { padding: 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
+    tbody tr { transition: all 0.2s; }
+    tbody tr:hover { background: var(--surface-hover); }
+    
+    .time-cell { font-weight: 600; color: var(--primary); font-family: 'Courier New', monospace; }
+    .sentiment-cell {
+      padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 12px;
+      text-align: center; display: inline-block;
+    }
+    .sentiment-bullish { background: rgba(76,175,80,0.15); color: var(--success); border: 1px solid var(--success); }
+    .sentiment-bearish { background: rgba(244,67,54,0.15); color: var(--danger); border: 1px solid var(--danger); }
+    .sentiment-neutral { background: rgba(255,152,0,0.15); color: var(--warning); border: 1px solid var(--warning); }
+    
+    .loading { text-align: center; padding: 60px 20px; color: var(--text-sec); }
+    .loading .material-icons { font-size: 48px; animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    
+    .row-count { font-size: 13px; color: var(--text-sec); margin-left: 8px; }
+    
+    @media (max-width: 968px) {
+      .sidebar { transform: translateX(-100%); }
+      .main-content { margin-left: 0; }
+      .stats-grid, .charts-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-title">
+      <span class="material-icons">show_chart</span>
+      PCR Tracker - Live (Shared)
+    </div>
+    <div class="header-actions">
+      <div class="status-badge live" id="market-status">
+        <span class="status-dot"></span>
+        <span id="status-text">Loading...</span>
+      </div>
+      <div id="last-update" style="font-size: 13px; color: var(--text-sec);"></div>
+    </div>
+  </header>
+
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Analysis</div>
+      <div class="sidebar-item active"><span class="material-icons">dashboard</span><span>Overview</span></div>
+      <div class="sidebar-item"><span class="material-icons">timeline</span><span>Live Data</span></div>
+      <div class="sidebar-item"><span class="material-icons">insert_chart</span><span>Charts</span></div>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <div class="symbol-tabs">
+      <div class="symbol-tab active" data-symbol="NIFTY">NIFTY</div>
+      <div class="symbol-tab" data-symbol="BANKNIFTY">BANKNIFTY</div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-header">
+          <div class="stat-title">Latest PCR</div>
+          <div class="stat-icon" style="background: rgba(33,150,243,0.15); color: var(--primary);">
+            <span class="material-icons">trending_up</span>
+          </div>
+        </div>
+        <div class="stat-value" id="stat-pcr">--</div>
+        <div class="stat-change" id="stat-pcr-change"></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-header">
+          <div class="stat-title">Call OI</div>
+          <div class="stat-icon" style="background: rgba(244,67,54,0.15); color: var(--danger);">
+            <span class="material-icons">call_made</span>
+          </div>
+        </div>
+        <div class="stat-value" id="stat-call-oi">--</div>
+        <div class="stat-change" id="stat-call-change"></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-header">
+          <div class="stat-title">Put OI</div>
+          <div class="stat-icon" style="background: rgba(76,175,80,0.15); color: var(--success);">
+            <span class="material-icons">call_received</span>
+          </div>
+        </div>
+        <div class="stat-value" id="stat-put-oi">--</div>
+        <div class="stat-change" id="stat-put-change"></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-header">
+          <div class="stat-title">Index Price</div>
+          <div class="stat-icon" style="background: rgba(255,152,0,0.15); color: var(--warning);">
+            <span class="material-icons">currency_rupee</span>
+          </div>
+        </div>
+        <div class="stat-value" id="stat-price">--</div>
+        <div class="stat-change" id="stat-sentiment"></div>
+      </div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="chart-card">
+        <div class="chart-title">
+          <span class="material-icons">show_chart</span>
+          PCR Trend (Today)
+        </div>
+        <canvas id="pcr-chart"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">
+          <span class="material-icons">bar_chart</span>
+          OI Distribution
+        </div>
+        <canvas id="oi-chart"></canvas>
+      </div>
+    </div>
+
+    <div class="data-section">
+      <div class="section-header">
+        <div class="section-title">
+          <span class="material-icons">table_chart</span>
+          Today's PCR Data (Shared for All Users)
+          <span class="row-count" id="row-count">(0 entries)</span>
+        </div>
+        <button class="refresh-btn" onclick="loadHistory()">
+          <span class="material-icons">refresh</span>
+          Refresh
+        </button>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th><th>Call OI</th><th>Put OI</th><th>PCR</th><th>Vol PCR</th>
+              <th>Call Chg</th><th>Put Chg</th><th>Call Vol</th><th>Put Vol</th>
+              <th>Price</th><th>Sentiment</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr>
+              <td colspan="11" class="loading">
+                <span class="material-icons">sync</span>
+                <div>Loading shared data from server...</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = window.location.origin; // Same server
+    let currentSymbol = 'NIFTY';
+    let allData = { NIFTY: [], BANKNIFTY: [], marketOpen: false };
+    let pcrChart = null, oiChart = null;
+
+    function fmt(num) { return new Intl.NumberFormat('en-IN').format(num || 0); }
+    function fmtTime(timeString) {
+      const d = new Date(timeString);
+      return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    }
+    function getSentiment(pcr) {
+      if (pcr >= 1.25) return 'Strong Bullish';
+      if (pcr >= 1.10) return 'Bullish';
+      if (pcr >= 1.00) return 'Neutral-Bullish';
+      if (pcr >= 0.85) return 'Neutral';
+      if (pcr >= 0.75) return 'Neutral-Bearish';
+      if (pcr >= 0.60) return 'Bearish';
+      return 'Strong Bearish';
+    }
+    function getSentimentClass(s) {
+      if (s.includes('Bullish')) return 'sentiment-bullish';
+      if (s.includes('Bearish')) return 'sentiment-bearish';
+      return 'sentiment-neutral';
+    }
+
+    async function loadHistory() {
+      try {
+        const res = await fetch(`${API_BASE}/api/history`);
+        const data = await res.json();
+        if (!data.success) throw new Error('API error');
+        
+        allData = data;
+        updateUI();
+        updateMarketStatus();
+      } catch (err) {
+        console.error(err);
+        showError();
+      }
+    }
+
+    function updateUI() {
+      const history = allData[currentSymbol] || [];
+      if (history.length === 0) {
+        showEmpty();
+        return;
+      }
+      
+      const latest = history[history.length - 1];
+      
+      // Stats
+      document.getElementById('stat-pcr').textContent = latest.pcr.toFixed(2);
+      document.getElementById('stat-call-oi').textContent = fmt(latest.totalCallOI);
+      document.getElementById('stat-put-oi').textContent = fmt(latest.totalPutOI);
+      document.getElementById('stat-price').textContent = `₹${fmt(latest.underlyingValue)}`;
+      const sentiment = getSentiment(latest.pcr);
+      document.getElementById('stat-sentiment').innerHTML = `<span class="${getSentimentClass(sentiment)}">${sentiment}</span>`;
+      document.getElementById('stat-call-change').textContent = fmt(latest.callOIChange);
+      document.getElementById('stat-put-change').textContent = fmt(latest.putOIChange);
+      
+      // Table
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = [...history].reverse().map(d => `
+        <tr>
+          <td class="time-cell">${fmtTime(d.time)}</td>
+          <td>${fmt(d.totalCallOI)}</td>
+          <td>${fmt(d.totalPutOI)}</td>
+          <td><strong>${d.pcr.toFixed(2)}</strong></td>
+          <td>${d.volumePCR.toFixed(2)}</td>
+          <td>${fmt(d.callOIChange)}</td>
+          <td>${fmt(d.putOIChange)}</td>
+          <td>${fmt(d.totalCallVolume)}</td>
+          <td>${fmt(d.totalPutVolume)}</td>
+          <td>₹${fmt(d.underlyingValue)}</td>
+          <td><span class="sentiment-cell ${getSentimentClass(getSentiment(d.pcr))}">${getSentiment(d.pcr)}</span></td>
+        </tr>
+      `).join('');
+      
+      document.getElementById('row-count').textContent = `(${history.length} ${history.length===1?'entry':'entries'})`;
+      document.getElementById('last-update').textContent = `Updated: ${new Date().toLocaleTimeString('en-IN')}`;
+      
+      updateCharts(history, latest);
+    }
+
+    function showEmpty() {
+      document.getElementById('table-body').innerHTML = `
+        <tr><td colspan="11" style="text-align:center; padding:60px 20px; color:var(--text-sec);">
+          <span class="material-icons" style="font-size:48px; opacity:0.3;">inbox</span>
+          <div style="margin-top:16px;">No data available for today</div>
+          <div style="font-size:13px; margin-top:8px;">Data will appear during market hours (09:15-15:30 IST)</div>
+        </td></tr>
+      `;
+    }
+
+    function showError() {
+      document.getElementById('table-body').innerHTML = `
+        <tr><td colspan="11" style="text-align:center; padding:60px 20px; color:var(--danger);">
+          <span class="material-icons" style="font-size:48px;">error_outline</span>
+          <div style="margin-top:16px;">Failed to load data</div>
+        </td></tr>
+      `;
+    }
+
+    function updateCharts(history, latest) {
+      const pcrCtx = document.getElementById('pcr-chart').getContext('2d');
+      if (pcrChart) pcrChart.destroy();
+      pcrChart = new Chart(pcrCtx, {
+        type: 'line',
+        data: {
+          labels: history.map(d => fmtTime(d.time)),
+          datasets: [{
+            label: 'PCR',
+            data: history.map(d => d.pcr),
+            borderColor: '#2196f3',
+            backgroundColor: 'rgba(33,150,243,0.1)',
+            tension: 0.4,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9fa8da' } },
+            x: { grid: { display: false }, ticks: { color: '#9fa8da', maxRotation: 45 } }
+          }
+        }
+      });
+
+      const oiCtx = document.getElementById('oi-chart').getContext('2d');
+      if (oiChart) oiChart.destroy();
+      oiChart = new Chart(oiCtx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Call OI', 'Put OI'],
+          datasets: [{
+            data: [latest.totalCallOI, latest.totalPutOI],
+            backgroundColor: ['rgba(244,67,54,0.8)', 'rgba(76,175,80,0.8)'],
+            borderColor: ['#f44336', '#4caf50'],
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'bottom', labels: { color: '#e8eaf6' } } }
+        }
+      });
+    }
+
+    function updateMarketStatus() {
+      const badge = document.getElementById('market-status');
+      const text = document.getElementById('status-text');
+      if (allData.marketOpen) {
+        badge.className = 'status-badge live';
+        text.textContent = 'Market Open';
+      } else {
+        badge.className = 'status-badge closed';
+        text.textContent = 'Market Closed';
+      }
+    }
+
+    document.querySelectorAll('.symbol-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.symbol-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentSymbol = tab.dataset.symbol;
+        updateUI();
+      });
+    });
+
+    loadHistory();
+    setInterval(loadHistory, 30000); // Refresh every 30s
+  </script>
+</body>
+</html>
