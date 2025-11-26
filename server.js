@@ -12,357 +12,504 @@ app.use(compression());
 app.use(express.json());
 app.use(express.static('public'));
 
+// ========== SESSION & DATA STORAGE ==========
 let sessionData = {
   cookies: null,
   timestamp: null,
-  ttl: 3 * 60 * 1000
+  ttl: 3 * 60 * 1000 // 3 minutes
 };
 
-// ========== TODAY'S PCR HISTORY (IN-MEMORY, SHARED FOR ALL USERS) ==========
 let todayHistory = {
-  date: null,
   NIFTY: [],
-  BANKNIFTY: []
+  BANKNIFTY: [],
+  date: new Date().toLocaleDateString('en-IN'),
+  marketOpen: false
 };
 
-async function initializeNSESession(forceRefresh = false) {
-  const now = Date.now();
+// NEW: Market data storage
+let marketData = {
+  indices: [],
+  gainers: [],
+  losers: [],
+  mostActive: [],
+  lastUpdate: null
+};
+
+// ========== MARKET HOURS CHECK ==========
+function isMarketHours() {
+  const now = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istTime = new Date(now.getTime() + istOffset);
   
-  if (!forceRefresh && sessionData.cookies && (now - sessionData.timestamp) < sessionData.ttl) {
+  const hours = istTime.getUTCHours();
+  const minutes = istTime.getUTCMinutes();
+  const day = istTime.getUTCDay();
+  
+  if (day === 0 || day === 6) return false;
+  
+  const currentMinutes = hours * 60 + minutes;
+  const marketStart = 9 * 60 + 15;
+  const marketEnd = 15 * 60 + 30;
+  
+  return currentMinutes >= marketStart && currentMinutes <= marketEnd;
+}
+
+// ========== SESSION MANAGEMENT ==========
+async function ensureSession() {
+  if (sessionData.cookies && 
+      sessionData.timestamp && 
+      (Date.now() - sessionData.timestamp < sessionData.ttl)) {
     return sessionData.cookies;
   }
   
   try {
-    console.log('🔄 Getting NSE session...');
-    
-    const homeResponse = await axios.get('https://www.nseindia.com', {
+    const response = await axios.get('https://www.nseindia.com', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive'
-      },
-      timeout: 15000
-    });
-    
-    const cookies = homeResponse.headers['set-cookie'];
-    if (!cookies) throw new Error('No cookies received');
-    
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    const cookieString = cookies.map(c => c.split(';')[0]).join('; ');
-    
-    await axios.get('https://www.nseindia.com/option-chain', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Cookie': cookieString,
-        'Referer': 'https://www.nseindia.com'
       }
     });
     
-    sessionData.cookies = cookieString;
-    sessionData.timestamp = now;
-    
-    console.log('✅ Session ready');
-    return cookieString;
-    
+    const cookies = response.headers['set-cookie'];
+    if (cookies) {
+      sessionData.cookies = cookies.join('; ');
+      sessionData.timestamp = Date.now();
+      console.log('✅ Session refreshed');
+      return sessionData.cookies;
+    }
   } catch (error) {
-    console.error('❌ Session error:', error.message);
-    throw error;
+    console.error('Session refresh error:', error.message);
   }
+  
+  return sessionData.cookies;
 }
 
-async function fetchOptionChain(symbol, retries = 3) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const cookies = await initializeNSESession(attempt > 1);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const url = `https://www.nseindia.com/api/option-chain-indices?symbol=${symbol}`;
-      
-      const response = await axios.get(url, {
+// ========== FETCH PCR DATA (EXISTING) ==========
+async function fetchPCRData(symbol) {
+  try {
+    const cookies = await ensureSession();
+    if (!cookies) throw new Error('No valid session');
+    
+    const response = await axios.get(
+      `https://www.nseindia.com/api/option-chain-indices?symbol=${symbol}`,
+      {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': '*/*',
+          'Accept': 'application/json',
+          'Accept-Language': 'en-US,en;q=0.9',
           'Cookie': cookies,
-          'Referer': 'https://www.nseindia.com/option-chain',
-          'X-Requested-With': 'XMLHttpRequest'
+          'Referer': 'https://www.nseindia.com/option-chain'
         },
-        timeout: 20000
-      });
-      
-      if (response.data && response.data.records) {
-        console.log(`✅ ${symbol} data fetched`);
-        return response.data;
+        timeout: 10000
       }
-      
-      throw new Error('Invalid response');
-      
-    } catch (error) {
-      console.log(`❌ Attempt ${attempt} failed for ${symbol}`);
-      if (attempt === retries) throw error;
-      await new Promise(resolve => setTimeout(resolve, attempt * 3000));
+    );
+    
+    const data = response.data;
+    let totalCallOI = 0, totalPutOI = 0;
+    let totalCallVolume = 0, totalPutVolume = 0;
+    let callOIChange = 0, putOIChange = 0;
+    
+    if (data.records && data.records.data) {
+      data.records.data.forEach(item => {
+        if (item.CE) {
+          totalCallOI += item.CE.openInterest || 0;
+          totalCallVolume += item.CE.totalTradedVolume || 0;
+          callOIChange += item.CE.changeinOpenInterest || 0;
+        }
+        if (item.PE) {
+          totalPutOI += item.PE.openInterest || 0;
+          totalPutVolume += item.PE.totalTradedVolume || 0;
+          putOIChange += item.PE.changeinOpenInterest || 0;
+        }
+      });
     }
+    
+    const pcr = totalCallOI > 0 ? (totalPutOI / totalCallOI) : 0;
+    const volumePCR = totalCallVolume > 0 ? (totalPutVolume / totalCallVolume) : 0;
+    
+    return {
+      success: true,
+      symbol,
+      totalCallOI,
+      totalPutOI,
+      pcr: parseFloat(pcr.toFixed(2)),
+      volumePCR: parseFloat(volumePCR.toFixed(2)),
+      callOIChange,
+      putOIChange,
+      totalCallVolume,
+      totalPutVolume,
+      underlyingValue: data.records?.underlyingValue || 0,
+      timestamp: new Date().toLocaleString('en-IN'),
+      fetchedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    console.error(`Error fetching ${symbol} PCR:`, error.message);
+    return { success: false, symbol, error: error.message };
   }
 }
 
-function calculatePCR(data) {
-  let totalCallOI = 0, totalPutOI = 0;
-  let callOIChange = 0, putOIChange = 0;
-  let totalCallVolume = 0, totalPutVolume = 0;
+// ========== NEW: FETCH MARKET INDICES ==========
+async function fetchMarketIndices() {
+  try {
+    const cookies = await ensureSession();
+    if (!cookies) throw new Error('No valid session');
+    
+    const response = await axios.get(
+      'https://www.nseindia.com/api/allIndices',
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Cookie': cookies,
+          'Referer': 'https://www.nseindia.com'
+        },
+        timeout: 10000
+      }
+    );
+    
+    const indices = response.data.data || [];
+    
+    // Filter important indices
+    const importantIndices = ['NIFTY 50', 'NIFTY BANK', 'NIFTY MIDCAP 100', 'INDIA VIX', 'NIFTY IT', 'NIFTY PHARMA'];
+    
+    return indices
+      .filter(idx => importantIndices.includes(idx.index))
+      .map(idx => ({
+        name: idx.index,
+        value: idx.last,
+        change: idx.percentChange,
+        previousClose: idx.previousClose,
+        open: idx.open,
+        high: idx.dayHigh,
+        low: idx.dayLow
+      }));
+  } catch (error) {
+    console.error('Error fetching indices:', error.message);
+    return [];
+  }
+}
+
+// ========== NEW: FETCH TOP GAINERS ==========
+async function fetchTopGainers() {
+  try {
+    const cookies = await ensureSession();
+    if (!cookies) throw new Error('No valid session');
+    
+    const response = await axios.get(
+      'https://www.nseindia.com/api/live-analysis-variations?index=gainers',
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Cookie': cookies,
+          'Referer': 'https://www.nseindia.com'
+        },
+        timeout: 10000
+      }
+    );
+    
+    const data = response.data.NIFTY || [];
+    
+    return data.slice(0, 10).map(stock => ({
+      symbol: stock.symbol,
+      name: stock.meta?.companyName || stock.symbol,
+      price: stock.lastPrice,
+      change: stock.pChange,
+      volume: stock.totalTradedVolume,
+      value: stock.totalTradedValue
+    }));
+  } catch (error) {
+    console.error('Error fetching gainers:', error.message);
+    return [];
+  }
+}
+
+// ========== NEW: FETCH TOP LOSERS ==========
+async function fetchTopLosers() {
+  try {
+    const cookies = await ensureSession();
+    if (!cookies) throw new Error('No valid session');
+    
+    const response = await axios.get(
+      'https://www.nseindia.com/api/live-analysis-variations?index=losers',
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Cookie': cookies,
+          'Referer': 'https://www.nseindia.com'
+        },
+        timeout: 10000
+      }
+    );
+    
+    const data = response.data.NIFTY || [];
+    
+    return data.slice(0, 10).map(stock => ({
+      symbol: stock.symbol,
+      name: stock.meta?.companyName || stock.symbol,
+      price: stock.lastPrice,
+      change: stock.pChange,
+      volume: stock.totalTradedVolume,
+      value: stock.totalTradedValue
+    }));
+  } catch (error) {
+    console.error('Error fetching losers:', error.message);
+    return [];
+  }
+}
+
+// ========== NEW: FETCH MOST ACTIVE ==========
+async function fetchMostActive() {
+  try {
+    const cookies = await ensureSession();
+    if (!cookies) throw new Error('No valid session');
+    
+    const response = await axios.get(
+      'https://www.nseindia.com/api/live-analysis-variations?index=volume',
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Cookie': cookies,
+          'Referer': 'https://www.nseindia.com'
+        },
+        timeout: 10000
+      }
+    );
+    
+    const data = response.data.NIFTY || [];
+    
+    return data.slice(0, 10).map(stock => ({
+      symbol: stock.symbol,
+      name: stock.meta?.companyName || stock.symbol,
+      price: stock.lastPrice,
+      change: stock.pChange,
+      volume: stock.totalTradedVolume,
+      value: stock.totalTradedValue
+    }));
+  } catch (error) {
+    console.error('Error fetching most active:', error.message);
+    return [];
+  }
+}
+
+// ========== AUTO-FETCH MARKET DATA ==========
+async function autoFetchMarketData() {
+  if (!isMarketHours()) {
+    console.log('⏸️  Market closed - skipping market data fetch');
+    todayHistory.marketOpen = false;
+    return;
+  }
   
-  data.records.data.forEach(item => {
-    if (item.CE) {
-      totalCallOI += item.CE.openInterest || 0;
-      callOIChange += item.CE.changeinOpenInterest || 0;
-      totalCallVolume += item.CE.totalTradedVolume || 0;
+  todayHistory.marketOpen = true;
+  console.log('🔄 Fetching market data...');
+  
+  try {
+    const [indices, gainers, losers, active] = await Promise.all([
+      fetchMarketIndices(),
+      fetchTopGainers(),
+      fetchTopLosers(),
+      fetchMostActive()
+    ]);
+    
+    marketData = {
+      indices,
+      gainers,
+      losers,
+      mostActive: active,
+      lastUpdate: new Date().toISOString()
+    };
+    
+    console.log(`✅ Market data updated: ${indices.length} indices, ${gainers.length} gainers`);
+  } catch (error) {
+    console.error('Error in autoFetchMarketData:', error);
+  }
+}
+
+// ========== AUTO-FETCH PCR DATA (EXISTING) ==========
+async function autoFetchPCRData() {
+  if (!isMarketHours()) {
+    console.log('⏸️  Market closed - skipping PCR fetch');
+    todayHistory.marketOpen = false;
+    return;
+  }
+  
+  todayHistory.marketOpen = true;
+  
+  const now = new Date();
+  const minutes = now.getMinutes();
+  if (minutes % 5 !== 0) return;
+  
+  console.log('🔄 Fetching PCR data...');
+  
+  try {
+    const [niftyData, bankniftyData] = await Promise.all([
+      fetchPCRData('NIFTY'),
+      fetchPCRData('BANKNIFTY')
+    ]);
+    
+    if (niftyData.success) {
+      const entry = {
+        time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+        ...niftyData
+      };
+      todayHistory.NIFTY.push(entry);
+      console.log(`✅ NIFTY PCR: ${niftyData.pcr}`);
     }
-    if (item.PE) {
-      totalPutOI += item.PE.openInterest || 0;
-      putOIChange += item.PE.changeinOpenInterest || 0;
-      totalPutVolume += item.PE.totalTradedVolume || 0;
+    
+    if (bankniftyData.success) {
+      const entry = {
+        time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+        ...bankniftyData
+      };
+      todayHistory.BANKNIFTY.push(entry);
+      console.log(`✅ BANKNIFTY PCR: ${bankniftyData.pcr}`);
     }
-  });
-  
-  const pcr = totalCallOI > 0 ? (totalPutOI / totalCallOI) : 0;
-  const volumePCR = totalCallVolume > 0 ? (totalPutVolume / totalCallVolume) : 0;
-  
-  return {
-    totalCallOI, totalPutOI,
-    pcr: parseFloat(pcr.toFixed(2)),
-    volumePCR: parseFloat(volumePCR.toFixed(2)),
-    callOIChange, putOIChange,
-    totalCallVolume, totalPutVolume,
-    underlyingValue: data.records.underlyingValue || 0,
-    timestamp: data.records.timestamp || new Date().toISOString()
-  };
+  } catch (error) {
+    console.error('Error in autoFetchPCRData:', error);
+  }
 }
 
-function isMarketOpen() {
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset);
+// ========== DAILY RESET ==========
+function resetDailyData() {
+  const today = new Date().toLocaleDateString('en-IN');
   
-  const day = istTime.getUTCDay();
-  const hour = istTime.getUTCHours();
-  const minute = istTime.getUTCMinutes();
-  
-  const isWeekday = day >= 1 && day <= 5;
-  const currentMinutes = hour * 60 + minute;
-  const marketOpen = 9 * 60 + 15;
-  const marketClose = 15 * 60 + 30;
-  
-  return isWeekday && currentMinutes >= marketOpen && currentMinutes <= marketClose;
-}
-
-function getTodayDateKey() {
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset);
-  
-  const year = istTime.getUTCFullYear();
-  const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(istTime.getUTCDate()).padStart(2, '0');
-  
-  return `${year}-${month}-${day}`;
-}
-
-function shouldClearData() {
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset);
-  
-  const hour = istTime.getUTCHours();
-  const minute = istTime.getUTCMinutes();
-  const currentMinutes = hour * 60 + minute;
-  
-  return currentMinutes >= 9*60 && currentMinutes < 9*60+15; // 09:00-09:15
-}
-
-function checkAndResetDaily() {
-  const today = getTodayDateKey();
-  if (todayHistory.date !== today || shouldClearData()) {
-    console.log('🔄 Clearing old data, starting fresh for', today);
+  if (todayHistory.date !== today) {
+    console.log('🔄 New day - resetting data');
     todayHistory = {
-      date: today,
       NIFTY: [],
-      BANKNIFTY: []
+      BANKNIFTY: [],
+      date: today,
+      marketOpen: false
+    };
+    
+    marketData = {
+      indices: [],
+      gainers: [],
+      losers: [],
+      mostActive: [],
+      lastUpdate: null
     };
   }
 }
 
-async function autoFetchJob() {
-  checkAndResetDaily();
-  
-  if (!isMarketOpen()) {
-    console.log('🔴 Market is closed - skipping');
-    return;
-  }
-  
-  console.log('\n🤖 AUTO-FETCH STARTED');
-  console.log('Time:', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
-  
-  const symbols = ['NIFTY', 'BANKNIFTY'];
-  
-  for (const symbol of symbols) {
-    try {
-      console.log(`\n📊 Fetching ${symbol}...`);
-      const data = await fetchOptionChain(symbol);
-      const pcr = calculatePCR(data);
-      
-      console.log(`   PCR: ${pcr.pcr}`);
-      console.log(`   Price: ₹${pcr.underlyingValue.toLocaleString('en-IN')}`);
-      
-      // Add to today's history
-      todayHistory[symbol].push({
-        time: new Date().toISOString(),
-        symbol,
-        ...pcr
-      });
-      
-      console.log(`   ✅ Added to history (${todayHistory[symbol].length} entries)`);
-      
-      await new Promise(resolve => setTimeout(resolve, 3000));
-    } catch (error) {
-      console.error(`❌ ${symbol} failed:`, error.message);
-    }
-  }
-  
-  console.log('\n✅ AUTO-FETCH COMPLETED\n');
-}
-
-// Run every 5 minutes during market hours
-cron.schedule('*/5 * * * *', () => {
-  if (isMarketOpen()) {
-    autoFetchJob();
-  }
-}, {
-  timezone: 'Asia/Kolkata'
-});
-
-console.log('⏰ Scheduler set up - runs every 5 min during market hours');
-
 // ========== API ENDPOINTS ==========
 
-app.get('/', (req, res) => {
-  res.json({
-    status: '🟢 LIVE',
-    service: 'NSE PCR Cloud Tracker',
-    marketOpen: isMarketOpen(),
-    todayEntries: {
-      NIFTY: todayHistory.NIFTY.length,
-      BANKNIFTY: todayHistory.BANKNIFTY.length
-    },
-    currentDate: getTodayDateKey(),
-    info: 'Auto-fetches data every 5 minutes during market hours (9:15-15:30 IST)',
-    endpoints: {
-      health: 'GET /health',
-      pcrLive: 'GET /api/pcr/:symbol',
-      pcrHistory: 'GET /api/pcr-history/:symbol',
-      allHistory: 'GET /api/history',
-      dashboard: 'GET /pcr.html'
-    }
-  });
-});
-
-app.get('/ping', (req, res) => {
-  res.send('OK');
-});
-
+// Health check
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    uptime: Math.floor(process.uptime()) + ' seconds',
-    marketOpen: isMarketOpen(),
-    timestamp: new Date().toISOString(),
-    currentDate: getTodayDateKey(),
-    historyCount: {
-      NIFTY: todayHistory.NIFTY.length,
-      BANKNIFTY: todayHistory.BANKNIFTY.length
-    }
+  res.json({ 
+    status: 'ok', 
+    marketOpen: isMarketHours(),
+    timestamp: new Date().toISOString()
   });
 });
 
-// Latest live data (single fetch)
-app.get('/api/pcr/:symbol', async (req, res) => {
-  const symbol = req.params.symbol.toUpperCase();
-  const validSymbols = ['NIFTY', 'BANKNIFTY'];
-  
-  if (!validSymbols.includes(symbol)) {
-    return res.status(400).json({ error: 'Invalid symbol', validSymbols });
-  }
-  
-  try {
-    const data = await fetchOptionChain(symbol);
-    const pcr = calculatePCR(data);
-    
-    res.json({
-      success: true,
-      symbol,
-      ...pcr,
-      fetchedAt: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      symbol
-    });
-  }
-});
-
-// Today's full history for a symbol
-app.get('/api/pcr-history/:symbol', (req, res) => {
-  const symbol = req.params.symbol.toUpperCase();
-  const validSymbols = ['NIFTY', 'BANKNIFTY'];
-  
-  if (!validSymbols.includes(symbol)) {
-    return res.status(400).json({ error: 'Invalid symbol', validSymbols });
-  }
-  
-  res.json({
-    success: true,
-    symbol,
-    date: todayHistory.date,
-    entries: todayHistory[symbol],
-    count: todayHistory[symbol].length
-  });
-});
-
-// All history (both symbols) - FOR WEBPAGE
+// Get PCR history
 app.get('/api/history', (req, res) => {
   res.json({
     success: true,
     date: todayHistory.date,
     NIFTY: todayHistory.NIFTY,
     BANKNIFTY: todayHistory.BANKNIFTY,
-    marketOpen: isMarketOpen()
+    marketOpen: todayHistory.marketOpen
   });
 });
 
-// Manual trigger for testing
-app.post('/api/trigger', async (req, res) => {
+// Get single symbol PCR
+app.get('/api/pcr/:symbol', async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  
+  if (symbol !== 'NIFTY' && symbol !== 'BANKNIFTY') {
+    return res.status(400).json({ success: false, error: 'Invalid symbol' });
+  }
+  
   try {
-    await autoFetchJob();
-    res.json({ success: true, message: 'Manual fetch completed' });
+    const data = await fetchPCRData(symbol);
+    res.json(data);
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
+// NEW: Get all market data
+app.get('/api/market/overview', (req, res) => {
+  res.json({
+    success: true,
+    ...marketData,
+    marketOpen: todayHistory.marketOpen
+  });
+});
+
+// NEW: Get indices only
+app.get('/api/market/indices', (req, res) => {
+  res.json({
+    success: true,
+    indices: marketData.indices,
+    lastUpdate: marketData.lastUpdate
+  });
+});
+
+// NEW: Get gainers only
+app.get('/api/market/gainers', (req, res) => {
+  res.json({
+    success: true,
+    gainers: marketData.gainers,
+    lastUpdate: marketData.lastUpdate
+  });
+});
+
+// NEW: Get losers only
+app.get('/api/market/losers', (req, res) => {
+  res.json({
+    success: true,
+    losers: marketData.losers,
+    lastUpdate: marketData.lastUpdate
+  });
+});
+
+// NEW: Get most active only
+app.get('/api/market/active', (req, res) => {
+  res.json({
+    success: true,
+    mostActive: marketData.mostActive,
+    lastUpdate: marketData.lastUpdate
+  });
+});
+
+// ========== CRON JOBS ==========
+
+// Check market hours every minute
+cron.schedule('* * * * *', () => {
+  resetDailyData();
+  autoFetchPCRData();
+});
+
+// Fetch market data every 2 minutes during market hours
+cron.schedule('*/2 * * * *', () => {
+  autoFetchMarketData();
+});
+
+// Reset at 9:00 AM every day
+cron.schedule('0 9 * * *', () => {
+  console.log('🔄 Daily reset at 9:00 AM');
+  resetDailyData();
+});
+
+// ========== START SERVER ==========
 app.listen(PORT, () => {
-  console.log('\n' + '='.repeat(70));
-  console.log('🚀 NSE PCR CLOUD TRACKER WITH SHARED HISTORY');
-  console.log('='.repeat(70));
-  console.log(`📍 Running on port: ${PORT}`);
-  console.log(`🔴 Market status: ${isMarketOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
-  console.log(`📅 Current date: ${getTodayDateKey()}`);
-  console.log(`⏰ Auto-fetch: Every 5 min (only during market hours)`);
-  console.log(`📊 History entries: NIFTY=${todayHistory.NIFTY.length}, BANKNIFTY=${todayHistory.BANKNIFTY.length}`);
-  console.log('='.repeat(70) + '\n');
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📊 Market hours: 09:15 - 15:30 IST`);
+  console.log(`⏰ Current status: ${isMarketHours() ? 'MARKET OPEN' : 'MARKET CLOSED'}`);
   
-  // Run once on startup if market is open
-  if (isMarketOpen()) {
-    setTimeout(autoFetchJob, 5000);
-  }
+  // Initial fetch
+  ensureSession().then(() => {
+    if (isMarketHours()) {
+      autoFetchPCRData();
+      autoFetchMarketData();
+    }
+  });
 });
