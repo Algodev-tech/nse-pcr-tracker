@@ -35,7 +35,7 @@ let marketData = {
   lastUpdate: null
 };
 
-// NEW: Closing data storage (persists after market close)
+// Closing data storage (persists after market close)
 let closingData = {
   indices: [],
   gainers: [],
@@ -43,6 +43,41 @@ let closingData = {
   mostActive: [],
   closeDate: null,
   lastUpdate: null
+};
+
+// ========== SAMPLE DATA FOR TESTING ==========
+const SAMPLE_CLOSING_DATA = {
+  indices: [
+    { name: 'NIFTY 50', value: 24413.50, change: 0.45, previousClose: 24304.35, open: 24320.10, high: 24455.80, low: 24289.25 },
+    { name: 'NIFTY BANK', value: 53298.40, change: 1.12, previousClose: 52710.20, open: 52755.30, high: 53412.85, low: 52688.40 },
+    { name: 'NIFTY MIDCAP 100', value: 56847.25, change: -0.28, previousClose: 57006.40, open: 56920.50, high: 57125.30, low: 56735.60 },
+    { name: 'INDIA VIX', value: 13.42, change: -5.24, previousClose: 14.16, open: 14.05, high: 14.22, low: 13.35 },
+    { name: 'NIFTY IT', value: 43521.35, change: 0.89, previousClose: 43138.20, open: 43175.80, high: 43598.45, low: 43052.30 },
+    { name: 'NIFTY PHARMA', value: 22847.60, change: -0.52, previousClose: 22966.85, open: 22935.20, high: 23012.40, low: 22789.15 }
+  ],
+  gainers: [
+    { symbol: 'ADANIPORTS', name: 'Adani Ports and Special Economic Zone Ltd', price: 1285.50, change: 4.25, volume: 8542100, value: 10985420000 },
+    { symbol: 'TATAMOTORS', name: 'Tata Motors Ltd', price: 785.20, change: 3.87, volume: 12458900, value: 9784520000 },
+    { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', price: 1742.30, change: 2.95, volume: 6845200, value: 11925840000 },
+    { symbol: 'INFY', name: 'Infosys Ltd', price: 1886.45, change: 2.68, volume: 4521800, value: 8530125000 },
+    { symbol: 'RELIANCE', name: 'Reliance Industries Ltd', price: 2845.60, change: 2.34, volume: 7854200, value: 22354880000 }
+  ],
+  losers: [
+    { symbol: 'HINDALCO', name: 'Hindalco Industries Ltd', price: 642.35, change: -3.45, volume: 9852400, value: 6329184000 },
+    { symbol: 'JSWSTEEL', name: 'JSW Steel Ltd', price: 895.80, change: -2.87, volume: 6421500, value: 5752854000 },
+    { symbol: 'TATASTEEL', name: 'Tata Steel Ltd', price: 142.25, change: -2.65, volume: 18542300, value: 2637162000 },
+    { symbol: 'COALINDIA', name: 'Coal India Ltd', price: 425.90, change: -2.42, volume: 5842100, value: 2488482000 },
+    { symbol: 'NTPC', name: 'NTPC Ltd', price: 358.75, change: -1.98, volume: 11254800, value: 4038097000 }
+  ],
+  mostActive: [
+    { symbol: 'RELIANCE', name: 'Reliance Industries Ltd', price: 2845.60, change: 2.34, volume: 7854200, value: 22354880000 },
+    { symbol: 'TATAMOTORS', name: 'Tata Motors Ltd', price: 785.20, change: 3.87, volume: 12458900, value: 9784520000 },
+    { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', price: 1742.30, change: 2.95, volume: 6845200, value: 11925840000 },
+    { symbol: 'ICICIBANK', name: 'ICICI Bank Ltd', price: 1298.55, change: 1.45, volume: 8952400, value: 11624538000 },
+    { symbol: 'INFY', name: 'Infosys Ltd', price: 1886.45, change: 2.68, volume: 4521800, value: 8530125000 }
+  ],
+  closeDate: new Date().toLocaleDateString('en-IN'),
+  lastUpdate: new Date().toISOString()
 };
 
 // ========== MARKET HOURS CHECK ==========
@@ -97,7 +132,7 @@ async function ensureSession() {
   return sessionData.cookies;
 }
 
-// ========== FETCH PCR DATA (EXISTING) ==========
+// ========== FETCH PCR DATA ==========
 async function fetchPCRData(symbol) {
   try {
     const cookies = await ensureSession();
@@ -337,11 +372,20 @@ async function autoFetchMarketData() {
         lastUpdate: new Date().toISOString()
       };
       console.log(`✅ Market data updated & saved as closing snapshot`);
+    } else if (closingData.indices.length === 0) {
+      // If no real data and no closing data, use sample data
+      console.log('📊 Using sample data for demonstration');
+      closingData = SAMPLE_CLOSING_DATA;
     }
     
     todayHistory.marketOpen = isMarketHours();
   } catch (error) {
     console.error('Error in autoFetchMarketData:', error);
+    // Use sample data on error if no closing data exists
+    if (closingData.indices.length === 0) {
+      console.log('📊 Using sample data due to fetch error');
+      closingData = SAMPLE_CLOSING_DATA;
+    }
   }
 }
 
@@ -408,8 +452,6 @@ function resetDailyData() {
       mostActive: [],
       lastUpdate: null
     };
-    
-    // Don't reset closingData - it persists to show last trading day
   }
 }
 
@@ -448,9 +490,7 @@ app.get('/api/pcr/:symbol', async (req, res) => {
   }
 });
 
-// Get all market data (live + closing fallback)
 app.get('/api/market/overview', (req, res) => {
-  // If market is open, return live data
   if (todayHistory.marketOpen && marketData.indices.length > 0) {
     return res.json({
       success: true,
@@ -460,7 +500,6 @@ app.get('/api/market/overview', (req, res) => {
     });
   }
   
-  // Otherwise return last closing data
   res.json({
     success: true,
     ...closingData,
@@ -469,7 +508,6 @@ app.get('/api/market/overview', (req, res) => {
   });
 });
 
-// NEW: Get closing data specifically
 app.get('/api/market/closing', (req, res) => {
   res.json({
     success: true,
@@ -520,7 +558,6 @@ cron.schedule('* * * * *', () => {
   autoFetchPCRData();
 });
 
-// Fetch market data every 2 minutes
 cron.schedule('*/2 * * * *', () => {
   autoFetchMarketData();
 });
@@ -536,9 +573,15 @@ app.listen(PORT, () => {
   console.log(`📊 Market hours: 09:15 - 15:30 IST`);
   console.log(`⏰ Current status: ${isMarketHours() ? 'MARKET OPEN' : 'MARKET CLOSED'}`);
   
+  // Load sample data immediately on startup
+  if (closingData.indices.length === 0) {
+    closingData = SAMPLE_CLOSING_DATA;
+    console.log('📊 Sample closing data loaded');
+  }
+  
   // Initial fetch
   ensureSession().then(() => {
-    autoFetchMarketData(); // Fetch immediately on startup
+    autoFetchMarketData();
     if (isMarketHours()) {
       autoFetchPCRData();
     }
