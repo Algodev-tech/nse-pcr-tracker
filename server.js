@@ -495,27 +495,27 @@ app.get('/api/market/overview', (req, res) => {
   let data;
   
   if (todayHistory.marketOpen && marketData.indices.length > 0) {
-    data = { ...marketData, marketOpen: true, dataType: 'live' };
+    data = { ...marketData };
   } else {
-    data = { ...closingData, marketOpen: false, dataType: 'closing' };
+    data = { ...closingData };
   }
   
-  // Fill empty arrays with sample data
-  if (data.gainers.length === 0) {
-    data.gainers = SAMPLE_CLOSING_DATA.gainers;
-  }
-  if (data.losers.length === 0) {
-    data.losers = SAMPLE_CLOSING_DATA.losers;
-  }
-  if (data.mostActive.length === 0) {
-    data.mostActive = SAMPLE_CLOSING_DATA.mostActive;
-  }
-  
-  res.json({
+  // ALWAYS fill empty arrays with sample data
+  const result = {
     success: true,
-    ...data
-  });
+    indices: data.indices.length > 0 ? data.indices : SAMPLE_CLOSING_DATA.indices,
+    gainers: data.gainers.length > 0 ? data.gainers : SAMPLE_CLOSING_DATA.gainers,
+    losers: data.losers.length > 0 ? data.losers : SAMPLE_CLOSING_DATA.losers,
+    mostActive: data.mostActive.length > 0 ? data.mostActive : SAMPLE_CLOSING_DATA.mostActive,
+    closeDate: data.closeDate || SAMPLE_CLOSING_DATA.closeDate,
+    lastUpdate: data.lastUpdate || SAMPLE_CLOSING_DATA.lastUpdate,
+    marketOpen: todayHistory.marketOpen,
+    dataType: todayHistory.marketOpen ? 'live' : 'closing'
+  };
+  
+  res.json(result);
 });
+
 
 app.get('/api/market/closing', (req, res) => {
   res.json({
