@@ -18,7 +18,7 @@ let sessionData = {
   ttl: 3 * 60 * 1000
 };
 
-// ========== TODAY'S PCR HISTORY (IN-MEMORY, SHARED) ==========
+// ========== TODAY'S PCR HISTORY (IN-MEMORY, SHARED FOR ALL USERS) ==========
 let todayHistory = {
   date: null,
   NIFTY: [],
@@ -140,9 +140,12 @@ function calculatePCR(data) {
 
 function isMarketOpen() {
   const now = new Date();
-  const hour = now.getUTCHours() + 5;
-  const minute = now.getUTCMinutes() + 30;
-  const day = now.getUTCDay();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  const day = istTime.getUTCDay();
+  const hour = istTime.getUTCHours();
+  const minute = istTime.getUTCMinutes();
   
   const isWeekday = day >= 1 && day <= 5;
   const currentMinutes = hour * 60 + minute;
@@ -154,14 +157,25 @@ function isMarketOpen() {
 
 function getTodayDateKey() {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  const year = istTime.getUTCFullYear();
+  const month = String(istTime.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(istTime.getUTCDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
 }
 
 function shouldClearData() {
   const now = new Date();
-  const hour = now.getUTCHours() + 5;
-  const minute = now.getUTCMinutes() + 30;
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istTime = new Date(now.getTime() + istOffset);
+  
+  const hour = istTime.getUTCHours();
+  const minute = istTime.getUTCMinutes();
   const currentMinutes = hour * 60 + minute;
+  
   return currentMinutes >= 9*60 && currentMinutes < 9*60+15; // 09:00-09:15
 }
 
@@ -239,12 +253,14 @@ app.get('/', (req, res) => {
       NIFTY: todayHistory.NIFTY.length,
       BANKNIFTY: todayHistory.BANKNIFTY.length
     },
+    currentDate: getTodayDateKey(),
     info: 'Auto-fetches data every 5 minutes during market hours (9:15-15:30 IST)',
     endpoints: {
       health: 'GET /health',
       pcrLive: 'GET /api/pcr/:symbol',
       pcrHistory: 'GET /api/pcr-history/:symbol',
-      allHistory: 'GET /api/history'
+      allHistory: 'GET /api/history',
+      dashboard: 'GET /pcr.html'
     }
   });
 });
@@ -259,6 +275,7 @@ app.get('/health', (req, res) => {
     uptime: Math.floor(process.uptime()) + ' seconds',
     marketOpen: isMarketOpen(),
     timestamp: new Date().toISOString(),
+    currentDate: getTodayDateKey(),
     historyCount: {
       NIFTY: todayHistory.NIFTY.length,
       BANKNIFTY: todayHistory.BANKNIFTY.length
@@ -266,7 +283,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Latest live data
+// Latest live data (single fetch)
 app.get('/api/pcr/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const validSymbols = ['NIFTY', 'BANKNIFTY'];
@@ -312,7 +329,7 @@ app.get('/api/pcr-history/:symbol', (req, res) => {
   });
 });
 
-// All history (both symbols)
+// All history (both symbols) - FOR WEBPAGE
 app.get('/api/history', (req, res) => {
   res.json({
     success: true,
@@ -323,6 +340,7 @@ app.get('/api/history', (req, res) => {
   });
 });
 
+// Manual trigger for testing
 app.post('/api/trigger', async (req, res) => {
   try {
     await autoFetchJob();
@@ -338,6 +356,7 @@ app.listen(PORT, () => {
   console.log('='.repeat(70));
   console.log(`📍 Running on port: ${PORT}`);
   console.log(`🔴 Market status: ${isMarketOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
+  console.log(`📅 Current date: ${getTodayDateKey()}`);
   console.log(`⏰ Auto-fetch: Every 5 min (only during market hours)`);
   console.log(`📊 History entries: NIFTY=${todayHistory.NIFTY.length}, BANKNIFTY=${todayHistory.BANKNIFTY.length}`);
   console.log('='.repeat(70) + '\n');
