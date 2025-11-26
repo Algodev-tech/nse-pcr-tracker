@@ -16,7 +16,7 @@ app.use(express.static('public'));
 let sessionData = {
   cookies: null,
   timestamp: null,
-  ttl: 3 * 60 * 1000 // 3 minutes
+  ttl: 3 * 60 * 1000
 };
 
 let todayHistory = {
@@ -26,12 +26,22 @@ let todayHistory = {
   marketOpen: false
 };
 
-// NEW: Market data storage
+// Market data storage (live)
 let marketData = {
   indices: [],
   gainers: [],
   losers: [],
   mostActive: [],
+  lastUpdate: null
+};
+
+// NEW: Closing data storage (persists after market close)
+let closingData = {
+  indices: [],
+  gainers: [],
+  losers: [],
+  mostActive: [],
+  closeDate: null,
   lastUpdate: null
 };
 
@@ -151,7 +161,7 @@ async function fetchPCRData(symbol) {
   }
 }
 
-// ========== NEW: FETCH MARKET INDICES ==========
+// ========== FETCH MARKET INDICES ==========
 async function fetchMarketIndices() {
   try {
     const cookies = await ensureSession();
@@ -171,8 +181,6 @@ async function fetchMarketIndices() {
     );
     
     const indices = response.data.data || [];
-    
-    // Filter important indices
     const importantIndices = ['NIFTY 50', 'NIFTY BANK', 'NIFTY MIDCAP 100', 'INDIA VIX', 'NIFTY IT', 'NIFTY PHARMA'];
     
     return indices
@@ -192,7 +200,7 @@ async function fetchMarketIndices() {
   }
 }
 
-// ========== NEW: FETCH TOP GAINERS ==========
+// ========== FETCH TOP GAINERS ==========
 async function fetchTopGainers() {
   try {
     const cookies = await ensureSession();
@@ -227,7 +235,7 @@ async function fetchTopGainers() {
   }
 }
 
-// ========== NEW: FETCH TOP LOSERS ==========
+// ========== FETCH TOP LOSERS ==========
 async function fetchTopLosers() {
   try {
     const cookies = await ensureSession();
@@ -262,7 +270,7 @@ async function fetchTopLosers() {
   }
 }
 
-// ========== NEW: FETCH MOST ACTIVE ==========
+// ========== FETCH MOST ACTIVE ==========
 async function fetchMostActive() {
   try {
     const cookies = await ensureSession();
@@ -299,13 +307,6 @@ async function fetchMostActive() {
 
 // ========== AUTO-FETCH MARKET DATA ==========
 async function autoFetchMarketData() {
-  if (!isMarketHours()) {
-    console.log('⏸️  Market closed - skipping market data fetch');
-    todayHistory.marketOpen = false;
-    return;
-  }
-  
-  todayHistory.marketOpen = true;
   console.log('🔄 Fetching market data...');
   
   try {
@@ -316,6 +317,7 @@ async function autoFetchMarketData() {
       fetchMostActive()
     ]);
     
+    // Store in live data
     marketData = {
       indices,
       gainers,
@@ -324,16 +326,28 @@ async function autoFetchMarketData() {
       lastUpdate: new Date().toISOString()
     };
     
-    console.log(`✅ Market data updated: ${indices.length} indices, ${gainers.length} gainers`);
+    // If market is open OR if we have data, update closing snapshot
+    if (indices.length > 0 || gainers.length > 0) {
+      closingData = {
+        indices,
+        gainers,
+        losers,
+        mostActive: active,
+        closeDate: new Date().toLocaleDateString('en-IN'),
+        lastUpdate: new Date().toISOString()
+      };
+      console.log(`✅ Market data updated & saved as closing snapshot`);
+    }
+    
+    todayHistory.marketOpen = isMarketHours();
   } catch (error) {
     console.error('Error in autoFetchMarketData:', error);
   }
 }
 
-// ========== AUTO-FETCH PCR DATA (EXISTING) ==========
+// ========== AUTO-FETCH PCR DATA ==========
 async function autoFetchPCRData() {
   if (!isMarketHours()) {
-    console.log('⏸️  Market closed - skipping PCR fetch');
     todayHistory.marketOpen = false;
     return;
   }
@@ -394,12 +408,13 @@ function resetDailyData() {
       mostActive: [],
       lastUpdate: null
     };
+    
+    // Don't reset closingData - it persists to show last trading day
   }
 }
 
 // ========== API ENDPOINTS ==========
 
-// Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
@@ -408,7 +423,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Get PCR history
 app.get('/api/history', (req, res) => {
   res.json({
     success: true,
@@ -419,7 +433,6 @@ app.get('/api/history', (req, res) => {
   });
 });
 
-// Get single symbol PCR
 app.get('/api/pcr/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   
@@ -435,65 +448,83 @@ app.get('/api/pcr/:symbol', async (req, res) => {
   }
 });
 
-// NEW: Get all market data
+// Get all market data (live + closing fallback)
 app.get('/api/market/overview', (req, res) => {
+  // If market is open, return live data
+  if (todayHistory.marketOpen && marketData.indices.length > 0) {
+    return res.json({
+      success: true,
+      ...marketData,
+      marketOpen: true,
+      dataType: 'live'
+    });
+  }
+  
+  // Otherwise return last closing data
   res.json({
     success: true,
-    ...marketData,
-    marketOpen: todayHistory.marketOpen
+    ...closingData,
+    marketOpen: false,
+    dataType: 'closing'
   });
 });
 
-// NEW: Get indices only
+// NEW: Get closing data specifically
+app.get('/api/market/closing', (req, res) => {
+  res.json({
+    success: true,
+    ...closingData
+  });
+});
+
 app.get('/api/market/indices', (req, res) => {
+  const data = todayHistory.marketOpen ? marketData : closingData;
   res.json({
     success: true,
-    indices: marketData.indices,
-    lastUpdate: marketData.lastUpdate
+    indices: data.indices,
+    lastUpdate: data.lastUpdate
   });
 });
 
-// NEW: Get gainers only
 app.get('/api/market/gainers', (req, res) => {
+  const data = todayHistory.marketOpen ? marketData : closingData;
   res.json({
     success: true,
-    gainers: marketData.gainers,
-    lastUpdate: marketData.lastUpdate
+    gainers: data.gainers,
+    lastUpdate: data.lastUpdate
   });
 });
 
-// NEW: Get losers only
 app.get('/api/market/losers', (req, res) => {
+  const data = todayHistory.marketOpen ? marketData : closingData;
   res.json({
     success: true,
-    losers: marketData.losers,
-    lastUpdate: marketData.lastUpdate
+    losers: data.losers,
+    lastUpdate: data.lastUpdate
   });
 });
 
-// NEW: Get most active only
 app.get('/api/market/active', (req, res) => {
+  const data = todayHistory.marketOpen ? marketData : closingData;
   res.json({
     success: true,
-    mostActive: marketData.mostActive,
-    lastUpdate: marketData.lastUpdate
+    mostActive: data.mostActive,
+    lastUpdate: data.lastUpdate
   });
 });
 
 // ========== CRON JOBS ==========
 
-// Check market hours every minute
 cron.schedule('* * * * *', () => {
   resetDailyData();
   autoFetchPCRData();
 });
 
-// Fetch market data every 2 minutes during market hours
+// Fetch market data every 2 minutes
 cron.schedule('*/2 * * * *', () => {
   autoFetchMarketData();
 });
 
-// Reset at 9:00 AM every day
 cron.schedule('0 9 * * *', () => {
   console.log('🔄 Daily reset at 9:00 AM');
   resetDailyData();
@@ -507,9 +538,9 @@ app.listen(PORT, () => {
   
   // Initial fetch
   ensureSession().then(() => {
+    autoFetchMarketData(); // Fetch immediately on startup
     if (isMarketHours()) {
       autoFetchPCRData();
-      autoFetchMarketData();
     }
   });
 });
