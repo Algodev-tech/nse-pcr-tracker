@@ -45,41 +45,6 @@ let closingData = {
   lastUpdate: null
 };
 
-// ========== SAMPLE DATA FOR TESTING ==========
-const SAMPLE_CLOSING_DATA = {
-  indices: [
-    { name: 'NIFTY 50', value: 24413.50, change: 0.45, previousClose: 24304.35, open: 24320.10, high: 24455.80, low: 24289.25 },
-    { name: 'NIFTY BANK', value: 53298.40, change: 1.12, previousClose: 52710.20, open: 52755.30, high: 53412.85, low: 52688.40 },
-    { name: 'NIFTY MIDCAP 100', value: 56847.25, change: -0.28, previousClose: 57006.40, open: 56920.50, high: 57125.30, low: 56735.60 },
-    { name: 'INDIA VIX', value: 13.42, change: -5.24, previousClose: 14.16, open: 14.05, high: 14.22, low: 13.35 },
-    { name: 'NIFTY IT', value: 43521.35, change: 0.89, previousClose: 43138.20, open: 43175.80, high: 43598.45, low: 43052.30 },
-    { name: 'NIFTY PHARMA', value: 22847.60, change: -0.52, previousClose: 22966.85, open: 22935.20, high: 23012.40, low: 22789.15 }
-  ],
-  gainers: [
-    { symbol: 'ADANIPORTS', name: 'Adani Ports and Special Economic Zone Ltd', price: 1285.50, change: 4.25, volume: 8542100, value: 10985420000 },
-    { symbol: 'TATAMOTORS', name: 'Tata Motors Ltd', price: 785.20, change: 3.87, volume: 12458900, value: 9784520000 },
-    { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', price: 1742.30, change: 2.95, volume: 6845200, value: 11925840000 },
-    { symbol: 'INFY', name: 'Infosys Ltd', price: 1886.45, change: 2.68, volume: 4521800, value: 8530125000 },
-    { symbol: 'RELIANCE', name: 'Reliance Industries Ltd', price: 2845.60, change: 2.34, volume: 7854200, value: 22354880000 }
-  ],
-  losers: [
-    { symbol: 'HINDALCO', name: 'Hindalco Industries Ltd', price: 642.35, change: -3.45, volume: 9852400, value: 6329184000 },
-    { symbol: 'JSWSTEEL', name: 'JSW Steel Ltd', price: 895.80, change: -2.87, volume: 6421500, value: 5752854000 },
-    { symbol: 'TATASTEEL', name: 'Tata Steel Ltd', price: 142.25, change: -2.65, volume: 18542300, value: 2637162000 },
-    { symbol: 'COALINDIA', name: 'Coal India Ltd', price: 425.90, change: -2.42, volume: 5842100, value: 2488482000 },
-    { symbol: 'NTPC', name: 'NTPC Ltd', price: 358.75, change: -1.98, volume: 11254800, value: 4038097000 }
-  ],
-  mostActive: [
-    { symbol: 'RELIANCE', name: 'Reliance Industries Ltd', price: 2845.60, change: 2.34, volume: 7854200, value: 22354880000 },
-    { symbol: 'TATAMOTORS', name: 'Tata Motors Ltd', price: 785.20, change: 3.87, volume: 12458900, value: 9784520000 },
-    { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', price: 1742.30, change: 2.95, volume: 6845200, value: 11925840000 },
-    { symbol: 'ICICIBANK', name: 'ICICI Bank Ltd', price: 1298.55, change: 1.45, volume: 8952400, value: 11624538000 },
-    { symbol: 'INFY', name: 'Infosys Ltd', price: 1886.45, change: 2.68, volume: 4521800, value: 8530125000 }
-  ],
-  closeDate: new Date().toLocaleDateString('en-IN'),
-  lastUpdate: new Date().toISOString()
-};
-
 // ========== MARKET HOURS CHECK ==========
 function isMarketHours() {
   const now = new Date();
@@ -352,40 +317,33 @@ async function autoFetchMarketData() {
       fetchMostActive()
     ]);
     
+    const timestamp = new Date().toISOString();
+    
     // Store in live data
     marketData = {
       indices,
       gainers,
       losers,
       mostActive: active,
-      lastUpdate: new Date().toISOString()
+      lastUpdate: timestamp
     };
     
-    // If market is open OR if we have data, update closing snapshot
-    if (indices.length > 0 || gainers.length > 0) {
+    // If we have valid data, update closing snapshot
+    if (indices.length > 0) {
       closingData = {
         indices,
         gainers,
         losers,
         mostActive: active,
         closeDate: new Date().toLocaleDateString('en-IN'),
-        lastUpdate: new Date().toISOString()
+        lastUpdate: timestamp
       };
-      console.log(`✅ Market data updated & saved as closing snapshot`);
-    } else if (closingData.indices.length === 0) {
-      // If no real data and no closing data, use sample data
-      console.log('📊 Using sample data for demonstration');
-      closingData = SAMPLE_CLOSING_DATA;
+      console.log(`✅ Market data updated - Indices: ${indices.length}, Gainers: ${gainers.length}, Losers: ${losers.length}`);
     }
     
     todayHistory.marketOpen = isMarketHours();
   } catch (error) {
     console.error('Error in autoFetchMarketData:', error);
-    // Use sample data on error if no closing data exists
-    if (closingData.indices.length === 0) {
-      console.log('📊 Using sample data due to fetch error');
-      closingData = SAMPLE_CLOSING_DATA;
-    }
   }
 }
 
@@ -397,10 +355,6 @@ async function autoFetchPCRData() {
   }
   
   todayHistory.marketOpen = true;
-  
-  const now = new Date();
-  const minutes = now.getMinutes();
-  if (minutes % 5 !== 0) return;
   
   console.log('🔄 Fetching PCR data...');
   
@@ -416,7 +370,7 @@ async function autoFetchPCRData() {
         ...niftyData
       };
       todayHistory.NIFTY.push(entry);
-      console.log(`✅ NIFTY PCR: ${niftyData.pcr}`);
+      console.log(`✅ NIFTY PCR: ${niftyData.pcr} (Underlying: ${niftyData.underlyingValue})`);
     }
     
     if (bankniftyData.success) {
@@ -425,7 +379,7 @@ async function autoFetchPCRData() {
         ...bankniftyData
       };
       todayHistory.BANKNIFTY.push(entry);
-      console.log(`✅ BANKNIFTY PCR: ${bankniftyData.pcr}`);
+      console.log(`✅ BANKNIFTY PCR: ${bankniftyData.pcr} (Underlying: ${bankniftyData.underlyingValue})`);
     }
   } catch (error) {
     console.error('Error in autoFetchPCRData:', error);
@@ -461,7 +415,13 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     marketOpen: isMarketHours(),
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    dataAvailable: {
+      indices: marketData.indices.length,
+      gainers: marketData.gainers.length,
+      losers: marketData.losers.length,
+      mostActive: marketData.mostActive.length
+    }
   });
 });
 
@@ -490,32 +450,35 @@ app.get('/api/pcr/:symbol', async (req, res) => {
   }
 });
 
-// Get all market data with sample fallback
+// Get all market data - REAL-TIME
 app.get('/api/market/overview', (req, res) => {
+  const isOpen = isMarketHours();
   let data;
   
-  if (todayHistory.marketOpen && marketData.indices.length > 0) {
-    data = { ...marketData };
+  if (isOpen && marketData.indices.length > 0) {
+    // Live market data
+    data = { ...marketData, marketOpen: true, dataType: 'live' };
+  } else if (closingData.indices.length > 0) {
+    // Closing snapshot
+    data = { ...closingData, marketOpen: false, dataType: 'closing' };
   } else {
-    data = { ...closingData };
+    // No data available
+    data = {
+      indices: [],
+      gainers: [],
+      losers: [],
+      mostActive: [],
+      lastUpdate: null,
+      marketOpen: false,
+      dataType: 'none'
+    };
   }
   
-  // ALWAYS fill empty arrays with sample data
-  const result = {
+  res.json({
     success: true,
-    indices: data.indices.length > 0 ? data.indices : SAMPLE_CLOSING_DATA.indices,
-    gainers: data.gainers.length > 0 ? data.gainers : SAMPLE_CLOSING_DATA.gainers,
-    losers: data.losers.length > 0 ? data.losers : SAMPLE_CLOSING_DATA.losers,
-    mostActive: data.mostActive.length > 0 ? data.mostActive : SAMPLE_CLOSING_DATA.mostActive,
-    closeDate: data.closeDate || SAMPLE_CLOSING_DATA.closeDate,
-    lastUpdate: data.lastUpdate || SAMPLE_CLOSING_DATA.lastUpdate,
-    marketOpen: todayHistory.marketOpen,
-    dataType: todayHistory.marketOpen ? 'live' : 'closing'
-  };
-  
-  res.json(result);
+    ...data
+  });
 });
-
 
 app.get('/api/market/closing', (req, res) => {
   res.json({
@@ -525,7 +488,7 @@ app.get('/api/market/closing', (req, res) => {
 });
 
 app.get('/api/market/indices', (req, res) => {
-  const data = todayHistory.marketOpen ? marketData : closingData;
+  const data = todayHistory.marketOpen && marketData.indices.length > 0 ? marketData : closingData;
   res.json({
     success: true,
     indices: data.indices,
@@ -534,49 +497,42 @@ app.get('/api/market/indices', (req, res) => {
 });
 
 app.get('/api/market/gainers', (req, res) => {
-  const data = todayHistory.marketOpen ? marketData : closingData;
-  const gainers = data.gainers.length > 0 ? data.gainers : SAMPLE_CLOSING_DATA.gainers;
-  
+  const data = todayHistory.marketOpen && marketData.gainers.length > 0 ? marketData : closingData;
   res.json({
     success: true,
-    gainers: gainers,
+    gainers: data.gainers,
     lastUpdate: data.lastUpdate
   });
 });
 
 app.get('/api/market/losers', (req, res) => {
-  const data = todayHistory.marketOpen ? marketData : closingData;
-  const losers = data.losers.length > 0 ? data.losers : SAMPLE_CLOSING_DATA.losers;
-  
+  const data = todayHistory.marketOpen && marketData.losers.length > 0 ? marketData : closingData;
   res.json({
     success: true,
-    losers: losers,
+    losers: data.losers,
     lastUpdate: data.lastUpdate
   });
 });
 
 app.get('/api/market/active', (req, res) => {
-  const data = todayHistory.marketOpen ? marketData : closingData;
-  const mostActive = data.mostActive.length > 0 ? data.mostActive : SAMPLE_CLOSING_DATA.mostActive;
-  
+  const data = todayHistory.marketOpen && marketData.mostActive.length > 0 ? marketData : closingData;
   res.json({
     success: true,
-    mostActive: mostActive,
+    mostActive: data.mostActive,
     lastUpdate: data.lastUpdate
   });
 });
 
 // ========== CRON JOBS ==========
 
+// Fetch market data every 1 minute
 cron.schedule('* * * * *', () => {
   resetDailyData();
+  autoFetchMarketData();
   autoFetchPCRData();
 });
 
-cron.schedule('*/2 * * * *', () => {
-  autoFetchMarketData();
-});
-
+// Daily reset at 9:00 AM
 cron.schedule('0 9 * * *', () => {
   console.log('🔄 Daily reset at 9:00 AM');
   resetDailyData();
@@ -586,15 +542,9 @@ cron.schedule('0 9 * * *', () => {
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Market hours: 09:15 - 15:30 IST`);
-  console.log(`⏰ Current status: ${isMarketHours() ? 'MARKET OPEN' : 'MARKET CLOSED'}`);
+  console.log(`⏰ Current status: ${isMarketHours() ? 'MARKET OPEN ✅' : 'MARKET CLOSED ❌'}`);
   
-  // Load sample data immediately on startup
-  if (closingData.indices.length === 0) {
-    closingData = SAMPLE_CLOSING_DATA;
-    console.log('📊 Sample closing data loaded');
-  }
-  
-  // Initial fetch
+  // Initial fetch on startup
   ensureSession().then(() => {
     autoFetchMarketData();
     if (isMarketHours()) {
