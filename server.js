@@ -209,7 +209,7 @@ async function fetchMarketIndices() {
   }
 }
 
-// ========== FETCH TOP GAINERS (FIXED) ==========
+// ========== FETCH TOP GAINERS (WITH DEBUG) ==========
 async function fetchTopGainers() {
   try {
     const cookies = await ensureSession();
@@ -228,19 +228,41 @@ async function fetchTopGainers() {
       }
     );
     
-    // Handle different response formats
-    let data = response.data.NIFTY || response.data.data || [];
+    // DEBUG: Log the actual response structure
+    console.log('📊 Gainers response keys:', Object.keys(response.data));
+    console.log('📊 Gainers response type:', typeof response.data);
+    
+    // Try multiple possible data locations
+    let data = response.data.NIFTY || 
+               response.data.data || 
+               response.data.advances || 
+               response.data;
+    
+    // If data is object with nested array, extract it
+    if (typeof data === 'object' && !Array.isArray(data)) {
+      console.log('📊 Gainers data object keys:', Object.keys(data));
+      // Try to find the array inside the object
+      for (let key in data) {
+        if (Array.isArray(data[key])) {
+          console.log('✅ Found array at key:', key);
+          data = data[key];
+          break;
+        }
+      }
+    }
     
     // Ensure data is an array
     if (!Array.isArray(data)) {
-      console.log('Gainers data is not an array:', typeof data);
+      console.log('❌ Gainers data is not an array after parsing:', typeof data);
       return [];
     }
     
     if (data.length === 0) {
-      console.log('No gainers data available yet');
+      console.log('⚠️ No gainers data available yet');
       return [];
     }
+    
+    console.log('✅ Found', data.length, 'gainers');
     
     return data.slice(0, 10).map(stock => ({
       symbol: stock.symbol,
@@ -256,7 +278,7 @@ async function fetchTopGainers() {
   }
 }
 
-// ========== FETCH TOP LOSERS (FIXED) ==========
+// ========== FETCH TOP LOSERS (WITH DEBUG) ==========
 async function fetchTopLosers() {
   try {
     const cookies = await ensureSession();
@@ -275,19 +297,39 @@ async function fetchTopLosers() {
       }
     );
     
-    // Handle different response formats
-    let data = response.data.NIFTY || response.data.data || [];
+    // DEBUG: Log the actual response structure
+    console.log('📊 Losers response keys:', Object.keys(response.data));
+    
+    // Try multiple possible data locations
+    let data = response.data.NIFTY || 
+               response.data.data || 
+               response.data.declines || 
+               response.data;
+    
+    // If data is object with nested array, extract it
+    if (typeof data === 'object' && !Array.isArray(data)) {
+      console.log('📊 Losers data object keys:', Object.keys(data));
+      for (let key in data) {
+        if (Array.isArray(data[key])) {
+          console.log('✅ Found array at key:', key);
+          data = data[key];
+          break;
+        }
+      }
+    }
     
     // Ensure data is an array
     if (!Array.isArray(data)) {
-      console.log('Losers data is not an array:', typeof data);
+      console.log('❌ Losers data is not an array after parsing:', typeof data);
       return [];
     }
     
     if (data.length === 0) {
-      console.log('No losers data available yet');
+      console.log('⚠️ No losers data available yet');
       return [];
     }
+    
+    console.log('✅ Found', data.length, 'losers');
     
     return data.slice(0, 10).map(stock => ({
       symbol: stock.symbol,
@@ -303,7 +345,7 @@ async function fetchTopLosers() {
   }
 }
 
-// ========== FETCH MOST ACTIVE (FIXED) ==========
+// ========== FETCH MOST ACTIVE (WITH DEBUG) ==========
 async function fetchMostActive() {
   try {
     const cookies = await ensureSession();
@@ -322,19 +364,39 @@ async function fetchMostActive() {
       }
     );
     
-    // Handle different response formats
-    let data = response.data.NIFTY || response.data.data || [];
+    // DEBUG: Log the actual response structure
+    console.log('📊 Volume response keys:', Object.keys(response.data));
+    
+    // Try multiple possible data locations
+    let data = response.data.NIFTY || 
+               response.data.data || 
+               response.data.volume || 
+               response.data;
+    
+    // If data is object with nested array, extract it
+    if (typeof data === 'object' && !Array.isArray(data)) {
+      console.log('📊 Volume data object keys:', Object.keys(data));
+      for (let key in data) {
+        if (Array.isArray(data[key])) {
+          console.log('✅ Found array at key:', key);
+          data = data[key];
+          break;
+        }
+      }
+    }
     
     // Ensure data is an array
     if (!Array.isArray(data)) {
-      console.log('Most active data is not an array:', typeof data);
+      console.log('❌ Most active data is not an array after parsing:', typeof data);
       return [];
     }
     
     if (data.length === 0) {
-      console.log('No most active data available yet');
+      console.log('⚠️ No most active data available yet');
       return [];
     }
+    
+    console.log('✅ Found', data.length, 'most active stocks');
     
     return data.slice(0, 10).map(stock => ({
       symbol: stock.symbol,
@@ -498,7 +560,7 @@ app.get('/api/pcr/:symbol', async (req, res) => {
 // Get all market data - REAL-TIME (FIXED)
 app.get('/api/market/overview', (req, res) => {
   const isOpen = isMarketHours();
-  todayHistory.marketOpen = isOpen; // Update the flag
+  todayHistory.marketOpen = isOpen;
   
   let data;
   
