@@ -19,58 +19,40 @@ let sessionData = {
   ttl: 3 * 60 * 1000
 };
 
-let todayHistory = {
+let pcrHistory = {
   NIFTY: [],
   BANKNIFTY: [],
   date: new Date().toLocaleDateString('en-IN'),
-  marketOpen: false
+  marketOpen: false,
+  lastFrozenData: null // Store 3:30 PM data
 };
 
-// Market data storage (live)
-let marketData = {
-  indices: [],
-  gainers: [],
-  losers: [],
-  mostActive: [],
-  lastUpdate: null
-};
-
-// Closing data storage (persists after market close)
-let closingData = {
-  indices: [],
-  gainers: [],
-  losers: [],
-  mostActive: [],
-  closeDate: null,
-  lastUpdate: null
-};
-
-// ========== MARKET HOURS CHECK (FIXED FOR IST) ==========
+// ========== MARKET HOURS CHECK ==========
 function isMarketHours() {
-  // Get current time in IST
   const now = new Date();
   const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
   
-  const day = istTime.getDay(); // 0 = Sunday, 6 = Saturday
+  const day = istTime.getDay();
   const hours = istTime.getHours();
   const minutes = istTime.getMinutes();
   
-  // Weekend check
-  if (day === 0 || day === 6) {
-    console.log('❌ Market closed - Weekend');
-    return false;
-  }
+  if (day === 0 || day === 6) return false;
   
-  // Convert to minutes since midnight
   const currentMinutes = hours * 60 + minutes;
-  const marketStart = 9 * 60 + 15;  // 9:15 AM
-  const marketEnd = 15 * 60 + 30;    // 3:30 PM
+  const marketStart = 9 * 60 + 15;
+  const marketEnd = 15 * 60 + 30;
   
-  const isOpen = currentMinutes >= marketStart && currentMinutes <= marketEnd;
-  
-  console.log(`⏰ IST Time: ${hours}:${minutes < 10 ? '0' : ''}${minutes} | Market ${isOpen ? 'OPEN ✅' : 'CLOSED ❌'}`);
-  
-  return isOpen;
+  return currentMinutes >= marketStart && currentMinutes <= marketEnd;
+}
+
+// ========== GET SENTIMENT FROM PCR ==========
+function getSentiment(pcr) {
+  if (pcr < 0.7) return 'Strong Bearish';
+  if (pcr >= 0.7 && pcr < 0.9) return 'Bearish';
+  if (pcr >= 0.9 && pcr <= 1.1) return 'Neutral';
+  if (pcr > 1.1 && pcr <= 1.3) return 'Neutral-Bullish';
+  if (pcr > 1.3 && pcr <= 1.5) return 'Bullish';
+  return 'Strong Bullish';
 }
 
 // ========== SESSION MANAGEMENT ==========
@@ -148,6 +130,7 @@ async function fetchPCRData(symbol) {
     
     const pcr = totalCallOI > 0 ? (totalPutOI / totalCallOI) : 0;
     const volumePCR = totalCallVolume > 0 ? (totalPutVolume / totalCallVolume) : 0;
+    const sentiment = getSentiment(pcr);
     
     return {
       success: true,
@@ -161,6 +144,7 @@ async function fetchPCRData(symbol) {
       totalCallVolume,
       totalPutVolume,
       underlyingValue: data.records?.underlyingValue || 0,
+      sentiment,
       timestamp: new Date().toLocaleString('en-IN'),
       fetchedAt: new Date().toISOString()
     };
@@ -170,292 +154,15 @@ async function fetchPCRData(symbol) {
   }
 }
 
-// ========== FETCH MARKET INDICES ==========
-async function fetchMarketIndices() {
-  try {
-    const cookies = await ensureSession();
-    if (!cookies) throw new Error('No valid session');
-    
-    const response = await axios.get(
-      'https://www.nseindia.com/api/allIndices',
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-          'Cookie': cookies,
-          'Referer': 'https://www.nseindia.com'
-        },
-        timeout: 10000
-      }
-    );
-    
-    const indices = response.data.data || [];
-    const importantIndices = ['NIFTY 50', 'NIFTY BANK', 'NIFTY MIDCAP 100', 'INDIA VIX', 'NIFTY IT', 'NIFTY PHARMA'];
-    
-    return indices
-      .filter(idx => importantIndices.includes(idx.index))
-      .map(idx => ({
-        name: idx.index,
-        value: idx.last,
-        change: idx.percentChange,
-        previousClose: idx.previousClose,
-        open: idx.open,
-        high: idx.dayHigh,
-        low: idx.dayLow
-      }));
-  } catch (error) {
-    console.error('Error fetching indices:', error.message);
-    return [];
-  }
-}
-
-// ========== HELPER: Extract Array from Response (FINAL FIX) ==========
-function extractArrayFromResponse(responseData, logPrefix) {
-  try {
-    // Handle string responses (NSE rate limiting)
-    if (typeof responseData === 'string') {
-      console.log(`${logPrefix} - Response is a string (rate limited):`, responseData);
-      return [];
-    }
-    
-    // Log structure for debugging
-    const keys = Object.keys(responseData);
-    console.log(`${logPrefix} - Response has keys:`, keys.join(', '));
-    
-    // Try different possible locations
-    let data = null;
-    
-    // Method 1: Check if response.data exists and is an array
-    if (responseData.data) {
-      if (Array.isArray(responseData.data)) {
-        console.log(`${logPrefix} - Found array at root.data`);
-        return responseData.data;
-      } else if (typeof responseData.data === 'string') {
-        console.log(`${logPrefix} - root.data is a string (rate limited)`);
-        return [];
-      }
-    }
-    
-    // Method 2: Check if response.NIFTY exists
-    if (responseData.NIFTY) {
-      console.log(`${logPrefix} - NIFTY exists, type:`, typeof responseData.NIFTY);
-      
-      if (Array.isArray(responseData.NIFTY)) {
-        data = responseData.NIFTY;
-      } else if (typeof responseData.NIFTY === 'object' && responseData.NIFTY !== null) {
-        // NIFTY is an object, look for data inside it
-        if (responseData.NIFTY.data && Array.isArray(responseData.NIFTY.data)) {
-          console.log(`${logPrefix} - Found array in NIFTY.data`);
-          data = responseData.NIFTY.data;
-        } else {
-          const niftyKeys = Object.keys(responseData.NIFTY);
-          console.log(`${logPrefix} - NIFTY object keys:`, niftyKeys.join(', '));
-          
-          for (let key of niftyKeys) {
-            if (Array.isArray(responseData.NIFTY[key])) {
-              console.log(`${logPrefix} - Found array in NIFTY.${key}`);
-              data = responseData.NIFTY[key];
-              break;
-            }
-          }
-        }
-      }
-    }
-    
-    // Method 3: If still no data, check root level for arrays
-    if (!data) {
-      for (let key of keys) {
-        if (Array.isArray(responseData[key])) {
-          console.log(`${logPrefix} - Found array at root level: ${key}`);
-          data = responseData[key];
-          break;
-        }
-      }
-    }
-    
-    return data || [];
-  } catch (error) {
-    console.error(`${logPrefix} - Error extracting array:`, error.message);
-    return [];
-  }
-}
-
-// ========== FETCH TOP GAINERS (FINAL) ==========
-async function fetchTopGainers() {
-  try {
-    const cookies = await ensureSession();
-    if (!cookies) throw new Error('No valid session');
-    
-    const response = await axios.get(
-      'https://www.nseindia.com/api/live-analysis-variations?index=gainers',
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-          'Cookie': cookies,
-          'Referer': 'https://www.nseindia.com'
-        },
-        timeout: 10000
-      }
-    );
-    
-    const data = extractArrayFromResponse(response.data, '📈 GAINERS');
-    
-    if (data.length === 0) {
-      console.log('⚠️ No gainers data available');
-      return [];
-    }
-    
-    console.log(`✅ Found ${data.length} gainers`);
-    
-    return data.slice(0, 10).map(stock => ({
-      symbol: stock.symbol,
-      name: stock.meta?.companyName || stock.symbol,
-      price: stock.lastPrice,
-      change: stock.pChange,
-      volume: stock.totalTradedVolume,
-      value: stock.totalTradedValue
-    }));
-  } catch (error) {
-    console.error('Error fetching gainers:', error.message);
-    return [];
-  }
-}
-
-// ========== FETCH TOP LOSERS (FINAL) ==========
-async function fetchTopLosers() {
-  try {
-    const cookies = await ensureSession();
-    if (!cookies) throw new Error('No valid session');
-    
-    const response = await axios.get(
-      'https://www.nseindia.com/api/live-analysis-variations?index=losers',
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-          'Cookie': cookies,
-          'Referer': 'https://www.nseindia.com'
-        },
-        timeout: 10000
-      }
-    );
-    
-    const data = extractArrayFromResponse(response.data, '📉 LOSERS');
-    
-    if (data.length === 0) {
-      console.log('⚠️ No losers data available');
-      return [];
-    }
-    
-    console.log(`✅ Found ${data.length} losers`);
-    
-    return data.slice(0, 10).map(stock => ({
-      symbol: stock.symbol,
-      name: stock.meta?.companyName || stock.symbol,
-      price: stock.lastPrice,
-      change: stock.pChange,
-      volume: stock.totalTradedVolume,
-      value: stock.totalTradedValue
-    }));
-  } catch (error) {
-    console.error('Error fetching losers:', error.message);
-    return [];
-  }
-}
-
-// ========== FETCH MOST ACTIVE (FINAL) ==========
-async function fetchMostActive() {
-  try {
-    const cookies = await ensureSession();
-    if (!cookies) throw new Error('No valid session');
-    
-    const response = await axios.get(
-      'https://www.nseindia.com/api/live-analysis-variations?index=volume',
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-          'Cookie': cookies,
-          'Referer': 'https://www.nseindia.com'
-        },
-        timeout: 10000
-      }
-    );
-    
-    const data = extractArrayFromResponse(response.data, '📊 VOLUME');
-    
-    if (data.length === 0) {
-      console.log('⚠️ No most active data available');
-      return [];
-    }
-    
-    console.log(`✅ Found ${data.length} most active stocks`);
-    
-    return data.slice(0, 10).map(stock => ({
-      symbol: stock.symbol,
-      name: stock.meta?.companyName || stock.symbol,
-      price: stock.lastPrice,
-      change: stock.pChange,
-      volume: stock.totalTradedVolume,
-      value: stock.totalTradedValue
-    }));
-  } catch (error) {
-    console.error('Error fetching most active:', error.message);
-    return [];
-  }
-}
-
-// ========== AUTO-FETCH MARKET DATA ==========
-async function autoFetchMarketData() {
-  console.log('🔄 Fetching market data...');
-  
-  try {
-    const [indices, gainers, losers, active] = await Promise.all([
-      fetchMarketIndices(),
-      fetchTopGainers(),
-      fetchTopLosers(),
-      fetchMostActive()
-    ]);
-    
-    const timestamp = new Date().toISOString();
-    
-    // Store in live data
-    marketData = {
-      indices,
-      gainers,
-      losers,
-      mostActive: active,
-      lastUpdate: timestamp
-    };
-    
-    // If we have valid data, update closing snapshot
-    if (indices.length > 0) {
-      closingData = {
-        indices,
-        gainers,
-        losers,
-        mostActive: active,
-        closeDate: new Date().toLocaleDateString('en-IN'),
-        lastUpdate: timestamp
-      };
-      console.log(`✅ Market data updated - Indices: ${indices.length}, Gainers: ${gainers.length}, Losers: ${losers.length}, Active: ${active.length}`);
-    }
-    
-    todayHistory.marketOpen = isMarketHours();
-  } catch (error) {
-    console.error('Error in autoFetchMarketData:', error);
-  }
-}
-
-// ========== AUTO-FETCH PCR DATA ==========
+// ========== AUTO-FETCH PCR DATA (3-MINUTE INTERVALS) ==========
 async function autoFetchPCRData() {
   if (!isMarketHours()) {
-    todayHistory.marketOpen = false;
+    pcrHistory.marketOpen = false;
+    // Freeze at last data point
     return;
   }
   
-  todayHistory.marketOpen = true;
+  pcrHistory.marketOpen = true;
   
   console.log('🔄 Fetching PCR data...');
   
@@ -465,47 +172,61 @@ async function autoFetchPCRData() {
       fetchPCRData('BANKNIFTY')
     ]);
     
+    const now = new Date();
+    const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const timeString = istTime.toLocaleTimeString('en-IN', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: false 
+    });
+    
     if (niftyData.success) {
       const entry = {
-        time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+        time: timeString,
         ...niftyData
       };
-      todayHistory.NIFTY.push(entry);
-      console.log(`✅ NIFTY PCR: ${niftyData.pcr} (Underlying: ${niftyData.underlyingValue})`);
+      pcrHistory.NIFTY.push(entry);
+      console.log(`✅ NIFTY PCR: ${niftyData.pcr} | Sentiment: ${niftyData.sentiment}`);
     }
     
     if (bankniftyData.success) {
       const entry = {
-        time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+        time: timeString,
         ...bankniftyData
       };
-      todayHistory.BANKNIFTY.push(entry);
-      console.log(`✅ BANKNIFTY PCR: ${bankniftyData.pcr} (Underlying: ${bankniftyData.underlyingValue})`);
+      pcrHistory.BANKNIFTY.push(entry);
+      console.log(`✅ BANKNIFTY PCR: ${bankniftyData.pcr} | Sentiment: ${bankniftyData.sentiment}`);
     }
+    
+    // Store last frozen data at 3:30 PM
+    pcrHistory.lastFrozenData = {
+      NIFTY: pcrHistory.NIFTY,
+      BANKNIFTY: pcrHistory.BANKNIFTY,
+      date: pcrHistory.date
+    };
+    
   } catch (error) {
     console.error('Error in autoFetchPCRData:', error);
   }
 }
 
-// ========== DAILY RESET ==========
+// ========== DAILY RESET AT 9:00 AM ==========
 function resetDailyData() {
   const today = new Date().toLocaleDateString('en-IN');
+  const now = new Date();
+  const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const hours = istTime.getHours();
+  const minutes = istTime.getMinutes();
   
-  if (todayHistory.date !== today) {
-    console.log('🔄 New day - resetting data');
-    todayHistory = {
+  // Reset at 9:00 AM if new day
+  if (pcrHistory.date !== today && hours === 9 && minutes === 0) {
+    console.log('🔄 New day - resetting PCR data at 9:00 AM');
+    pcrHistory = {
       NIFTY: [],
       BANKNIFTY: [],
       date: today,
-      marketOpen: false
-    };
-    
-    marketData = {
-      indices: [],
-      gainers: [],
-      losers: [],
-      mostActive: [],
-      lastUpdate: null
+      marketOpen: false,
+      lastFrozenData: null
     };
   }
 }
@@ -517,214 +238,121 @@ app.get('/health', (req, res) => {
     status: 'ok', 
     marketOpen: isMarketHours(),
     timestamp: new Date().toISOString(),
-    dataAvailable: {
-      indices: marketData.indices.length,
-      gainers: marketData.gainers.length,
-      losers: marketData.losers.length,
-      mostActive: marketData.mostActive.length
+    entriesCount: {
+      nifty: pcrHistory.NIFTY.length,
+      banknifty: pcrHistory.BANKNIFTY.length
     }
   });
 });
 
-app.get('/api/history', (req, res) => {
-  res.json({
-    success: true,
-    date: todayHistory.date,
-    NIFTY: todayHistory.NIFTY,
-    BANKNIFTY: todayHistory.BANKNIFTY,
-    marketOpen: todayHistory.marketOpen
-  });
-});
-
-app.get('/api/pcr/:symbol', async (req, res) => {
-  const symbol = req.params.symbol.toUpperCase();
-  
-  if (symbol !== 'NIFTY' && symbol !== 'BANKNIFTY') {
-    return res.status(400).json({ success: false, error: 'Invalid symbol' });
-  }
-  
-  try {
-    const data = await fetchPCRData(symbol);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// DEBUG ENDPOINT
-app.get('/api/debug/gainers', async (req, res) => {
-  try {
-    const cookies = await ensureSession();
-    if (!cookies) throw new Error('No valid session');
-    
-    const response = await axios.get(
-      'https://www.nseindia.com/api/live-analysis-variations?index=gainers',
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-          'Cookie': cookies,
-          'Referer': 'https://www.nseindia.com'
-        },
-        timeout: 10000
-      }
-    );
-    
-    res.json({
-      success: true,
-      responseKeys: Object.keys(response.data),
-      responseType: typeof response.data,
-      niftyType: typeof response.data.NIFTY,
-      niftyKeys: response.data.NIFTY ? Object.keys(response.data.NIFTY) : null,
-      sampleData: response.data.NIFTY?.data?.slice(0, 2) || null
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Get all market data - REAL-TIME
-app.get('/api/market/overview', (req, res) => {
+// Get PCR history (returns current day OR frozen data)
+app.get('/api/pcr/history', (req, res) => {
   const isOpen = isMarketHours();
-  todayHistory.marketOpen = isOpen;
   
-  let data;
+  let responseData = {
+    success: true,
+    date: pcrHistory.date,
+    marketOpen: isOpen,
+    NIFTY: pcrHistory.NIFTY,
+    BANKNIFTY: pcrHistory.BANKNIFTY
+  };
   
-  if (isOpen) {
-    if (marketData.indices.length > 0) {
-      data = { ...marketData, marketOpen: true, dataType: 'live' };
-    } else if (closingData.indices.length > 0) {
-      data = { ...closingData, marketOpen: true, dataType: 'closing-live' };
-    } else {
-      data = {
-        indices: [],
-        gainers: [],
-        losers: [],
-        mostActive: [],
-        lastUpdate: null,
-        marketOpen: true,
-        dataType: 'waiting'
-      };
-    }
-  } else {
-    data = { 
-      ...closingData, 
-      marketOpen: false, 
-      dataType: 'closing' 
+  // If market is closed and we have frozen data, use it
+  if (!isOpen && pcrHistory.lastFrozenData) {
+    responseData = {
+      success: true,
+      date: pcrHistory.lastFrozenData.date,
+      marketOpen: false,
+      NIFTY: pcrHistory.lastFrozenData.NIFTY,
+      BANKNIFTY: pcrHistory.lastFrozenData.BANKNIFTY,
+      frozen: true
     };
   }
   
-  res.json({
-    success: true,
-    ...data
-  });
+  res.json(responseData);
 });
 
-app.get('/api/market/closing', (req, res) => {
-  res.json({
-    success: true,
-    ...closingData
-  });
-});
-
-app.get('/api/market/indices', (req, res) => {
-  const isOpen = isMarketHours();
-  const data = isOpen && marketData.indices.length > 0 ? marketData : closingData;
-  res.json({
-    success: true,
-    indices: data.indices,
-    lastUpdate: data.lastUpdate,
-    marketOpen: isOpen
-  });
-});
-
-app.get('/api/market/gainers', (req, res) => {
-  const isOpen = isMarketHours();
-  const data = isOpen && marketData.gainers.length > 0 ? marketData : closingData;
-  res.json({
-    success: true,
-    gainers: data.gainers,
-    lastUpdate: data.lastUpdate,
-    marketOpen: isOpen
-  });
-});
-
-app.get('/api/market/losers', (req, res) => {
-  const isOpen = isMarketHours();
-  const data = isOpen && marketData.losers.length > 0 ? marketData : closingData;
-  res.json({
-    success: true,
-    losers: data.losers,
-    lastUpdate: data.lastUpdate,
-    marketOpen: isOpen
-  });
-});
-
-app.get('/api/market/active', (req, res) => {
-  const isOpen = isMarketHours();
-  const data = isOpen && marketData.mostActive.length > 0 ? marketData : closingData;
-  res.json({
-    success: true,
-    mostActive: data.mostActive,
-    lastUpdate: data.lastUpdate,
-    marketOpen: isOpen
-  });
-});
-
-// Manual trigger endpoint
-app.get('/api/trigger/fetch', async (req, res) => {
-  console.log('🔄 Manual fetch triggered');
+// Get latest PCR values
+app.get('/api/pcr/latest', (req, res) => {
+  const niftyLatest = pcrHistory.NIFTY[pcrHistory.NIFTY.length - 1] || null;
+  const bankniftyLatest = pcrHistory.BANKNIFTY[pcrHistory.BANKNIFTY.length - 1] || null;
   
-  try {
-    await autoFetchMarketData();
-    
-    res.json({
-      success: true,
-      message: 'Data fetch triggered',
-      marketOpen: isMarketHours(),
-      dataFetched: {
-        indices: marketData.indices.length,
-        gainers: marketData.gainers.length,
-        losers: marketData.losers.length,
-        mostActive: marketData.mostActive.length
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
+  res.json({
+    success: true,
+    marketOpen: isMarketHours(),
+    NIFTY: niftyLatest,
+    BANKNIFTY: bankniftyLatest
+  });
+});
+
+// Manual fetch endpoint
+app.get('/api/pcr/fetch', async (req, res) => {
+  if (!isMarketHours()) {
+    return res.json({
       success: false,
-      error: error.message
+      message: 'Market is closed. No fetching outside 9:15 AM - 3:30 PM.'
     });
   }
+  
+  await autoFetchPCRData();
+  
+  res.json({
+    success: true,
+    message: 'PCR data fetched',
+    entriesCount: {
+      nifty: pcrHistory.NIFTY.length,
+      banknifty: pcrHistory.BANKNIFTY.length
+    }
+  });
 });
 
 // ========== CRON JOBS ==========
 
-// Fetch market data every 1 minute
-cron.schedule('* * * * *', () => {
+// Fetch PCR data every 3 minutes during market hours (9:18, 9:21, 9:24...)
+cron.schedule('*/3 9-15 * * 1-5', () => {
   resetDailyData();
-  autoFetchMarketData();
-  autoFetchPCRData();
+  
+  const now = new Date();
+  const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const hours = istTime.getHours();
+  const minutes = istTime.getMinutes();
+  
+  // Only fetch between 9:15 - 15:30
+  const currentMin = hours * 60 + minutes;
+  const start = 9 * 60 + 15;
+  const end = 15 * 60 + 30;
+  
+  if (currentMin >= start && currentMin <= end) {
+    // Start from 9:18 (3 minutes after market open)
+    if (currentMin >= start + 3) {
+      autoFetchPCRData();
+    }
+  }
 });
 
 // Daily reset at 9:00 AM
-cron.schedule('0 9 * * *', () => {
+cron.schedule('0 9 * * 1-5', () => {
   console.log('🔄 Daily reset at 9:00 AM');
   resetDailyData();
 });
 
 // ========== START SERVER ==========
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 PCR Tracker Server running on port ${PORT}`);
   console.log(`📊 Market hours: 09:15 - 15:30 IST`);
   console.log(`⏰ Current status: ${isMarketHours() ? 'MARKET OPEN ✅' : 'MARKET CLOSED ❌'}`);
+  console.log(`🕐 PCR fetch interval: Every 3 minutes (starting 9:18 AM)`);
   
-  // Initial fetch on startup
+  // Initial fetch if market is open and past 9:18 AM
   ensureSession().then(() => {
-    autoFetchMarketData();
-    if (isMarketHours()) {
+    const now = new Date();
+    const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const hours = istTime.getHours();
+    const minutes = istTime.getMinutes();
+    const currentMin = hours * 60 + minutes;
+    const firstFetch = 9 * 60 + 18; // 9:18 AM
+    
+    if (isMarketHours() && currentMin >= firstFetch) {
       autoFetchPCRData();
     }
   });
