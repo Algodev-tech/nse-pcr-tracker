@@ -209,7 +209,56 @@ async function fetchMarketIndices() {
   }
 }
 
-// ========== FETCH TOP GAINERS (WITH DEBUG) ==========
+// ========== HELPER: Extract Array from Response ==========
+function extractArrayFromResponse(responseData, logPrefix) {
+  try {
+    // Log structure for debugging
+    const keys = Object.keys(responseData);
+    console.log(`${logPrefix} - Response has keys:`, keys.join(', '));
+    
+    // Try different possible locations
+    let data = null;
+    
+    // Check if response.NIFTY exists and what it contains
+    if (responseData.NIFTY) {
+      console.log(`${logPrefix} - NIFTY exists, type:`, typeof responseData.NIFTY);
+      
+      if (Array.isArray(responseData.NIFTY)) {
+        data = responseData.NIFTY;
+      } else if (typeof responseData.NIFTY === 'object') {
+        // NIFTY is an object, look for arrays inside it
+        const niftyKeys = Object.keys(responseData.NIFTY);
+        console.log(`${logPrefix} - NIFTY object keys:`, niftyKeys.join(', '));
+        
+        for (let key of niftyKeys) {
+          if (Array.isArray(responseData.NIFTY[key])) {
+            console.log(`${logPrefix} - Found array in NIFTY.${key}`);
+            data = responseData.NIFTY[key];
+            break;
+          }
+        }
+      }
+    }
+    
+    // If still no data, check root level for arrays
+    if (!data) {
+      for (let key of keys) {
+        if (Array.isArray(responseData[key])) {
+          console.log(`${logPrefix} - Found array at root level: ${key}`);
+          data = responseData[key];
+          break;
+        }
+      }
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error(`${logPrefix} - Error extracting array:`, error.message);
+    return [];
+  }
+}
+
+// ========== FETCH TOP GAINERS (IMPROVED) ==========
 async function fetchTopGainers() {
   try {
     const cookies = await ensureSession();
@@ -228,41 +277,14 @@ async function fetchTopGainers() {
       }
     );
     
-    // DEBUG: Log the actual response structure
-    console.log('📊 Gainers response keys:', Object.keys(response.data));
-    console.log('📊 Gainers response type:', typeof response.data);
-    
-    // Try multiple possible data locations
-    let data = response.data.NIFTY || 
-               response.data.data || 
-               response.data.advances || 
-               response.data;
-    
-    // If data is object with nested array, extract it
-    if (typeof data === 'object' && !Array.isArray(data)) {
-      console.log('📊 Gainers data object keys:', Object.keys(data));
-      // Try to find the array inside the object
-      for (let key in data) {
-        if (Array.isArray(data[key])) {
-          console.log('✅ Found array at key:', key);
-          data = data[key];
-          break;
-        }
-      }
-    }
-    
-    // Ensure data is an array
-    if (!Array.isArray(data)) {
-      console.log('❌ Gainers data is not an array after parsing:', typeof data);
-      return [];
-    }
+    const data = extractArrayFromResponse(response.data, '📈 GAINERS');
     
     if (data.length === 0) {
-      console.log('⚠️ No gainers data available yet');
+      console.log('⚠️ No gainers data available');
       return [];
     }
     
-    console.log('✅ Found', data.length, 'gainers');
+    console.log(`✅ Found ${data.length} gainers`);
     
     return data.slice(0, 10).map(stock => ({
       symbol: stock.symbol,
@@ -278,7 +300,7 @@ async function fetchTopGainers() {
   }
 }
 
-// ========== FETCH TOP LOSERS (WITH DEBUG) ==========
+// ========== FETCH TOP LOSERS (IMPROVED) ==========
 async function fetchTopLosers() {
   try {
     const cookies = await ensureSession();
@@ -297,39 +319,14 @@ async function fetchTopLosers() {
       }
     );
     
-    // DEBUG: Log the actual response structure
-    console.log('📊 Losers response keys:', Object.keys(response.data));
-    
-    // Try multiple possible data locations
-    let data = response.data.NIFTY || 
-               response.data.data || 
-               response.data.declines || 
-               response.data;
-    
-    // If data is object with nested array, extract it
-    if (typeof data === 'object' && !Array.isArray(data)) {
-      console.log('📊 Losers data object keys:', Object.keys(data));
-      for (let key in data) {
-        if (Array.isArray(data[key])) {
-          console.log('✅ Found array at key:', key);
-          data = data[key];
-          break;
-        }
-      }
-    }
-    
-    // Ensure data is an array
-    if (!Array.isArray(data)) {
-      console.log('❌ Losers data is not an array after parsing:', typeof data);
-      return [];
-    }
+    const data = extractArrayFromResponse(response.data, '📉 LOSERS');
     
     if (data.length === 0) {
-      console.log('⚠️ No losers data available yet');
+      console.log('⚠️ No losers data available');
       return [];
     }
     
-    console.log('✅ Found', data.length, 'losers');
+    console.log(`✅ Found ${data.length} losers`);
     
     return data.slice(0, 10).map(stock => ({
       symbol: stock.symbol,
@@ -345,7 +342,7 @@ async function fetchTopLosers() {
   }
 }
 
-// ========== FETCH MOST ACTIVE (WITH DEBUG) ==========
+// ========== FETCH MOST ACTIVE (IMPROVED) ==========
 async function fetchMostActive() {
   try {
     const cookies = await ensureSession();
@@ -364,39 +361,14 @@ async function fetchMostActive() {
       }
     );
     
-    // DEBUG: Log the actual response structure
-    console.log('📊 Volume response keys:', Object.keys(response.data));
-    
-    // Try multiple possible data locations
-    let data = response.data.NIFTY || 
-               response.data.data || 
-               response.data.volume || 
-               response.data;
-    
-    // If data is object with nested array, extract it
-    if (typeof data === 'object' && !Array.isArray(data)) {
-      console.log('📊 Volume data object keys:', Object.keys(data));
-      for (let key in data) {
-        if (Array.isArray(data[key])) {
-          console.log('✅ Found array at key:', key);
-          data = data[key];
-          break;
-        }
-      }
-    }
-    
-    // Ensure data is an array
-    if (!Array.isArray(data)) {
-      console.log('❌ Most active data is not an array after parsing:', typeof data);
-      return [];
-    }
+    const data = extractArrayFromResponse(response.data, '📊 VOLUME');
     
     if (data.length === 0) {
-      console.log('⚠️ No most active data available yet');
+      console.log('⚠️ No most active data available');
       return [];
     }
     
-    console.log('✅ Found', data.length, 'most active stocks');
+    console.log(`✅ Found ${data.length} most active stocks`);
     
     return data.slice(0, 10).map(stock => ({
       symbol: stock.symbol,
@@ -557,7 +529,42 @@ app.get('/api/pcr/:symbol', async (req, res) => {
   }
 });
 
-// Get all market data - REAL-TIME (FIXED)
+// DEBUG ENDPOINT
+app.get('/api/debug/gainers', async (req, res) => {
+  try {
+    const cookies = await ensureSession();
+    if (!cookies) throw new Error('No valid session');
+    
+    const response = await axios.get(
+      'https://www.nseindia.com/api/live-analysis-variations?index=gainers',
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Cookie': cookies,
+          'Referer': 'https://www.nseindia.com'
+        },
+        timeout: 10000
+      }
+    );
+    
+    res.json({
+      success: true,
+      responseKeys: Object.keys(response.data),
+      responseType: typeof response.data,
+      fullResponse: response.data,
+      niftyType: typeof response.data.NIFTY,
+      niftyKeys: response.data.NIFTY ? Object.keys(response.data.NIFTY) : null
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get all market data - REAL-TIME
 app.get('/api/market/overview', (req, res) => {
   const isOpen = isMarketHours();
   todayHistory.marketOpen = isOpen;
@@ -565,7 +572,6 @@ app.get('/api/market/overview', (req, res) => {
   let data;
   
   if (isOpen) {
-    // Market is OPEN - use live data if available, otherwise use closing
     if (marketData.indices.length > 0) {
       data = { ...marketData, marketOpen: true, dataType: 'live' };
     } else if (closingData.indices.length > 0) {
@@ -582,7 +588,6 @@ app.get('/api/market/overview', (req, res) => {
       };
     }
   } else {
-    // Market is CLOSED - use closing snapshot
     data = { 
       ...closingData, 
       marketOpen: false, 
@@ -647,7 +652,7 @@ app.get('/api/market/active', (req, res) => {
   });
 });
 
-// Manual trigger endpoint for testing/forcing updates
+// Manual trigger endpoint
 app.get('/api/trigger/fetch', async (req, res) => {
   console.log('🔄 Manual fetch triggered');
   
@@ -664,42 +669,6 @@ app.get('/api/trigger/fetch', async (req, res) => {
         losers: marketData.losers.length,
         mostActive: marketData.mostActive.length
       }
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-
-// ========== DEBUG ENDPOINT - Check NSE Response ==========
-app.get('/api/debug/gainers', async (req, res) => {
-  try {
-    const cookies = await ensureSession();
-    if (!cookies) throw new Error('No valid session');
-    
-    const response = await axios.get(
-      'https://www.nseindia.com/api/live-analysis-variations?index=gainers',
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-          'Cookie': cookies,
-          'Referer': 'https://www.nseindia.com'
-        },
-        timeout: 10000
-      }
-    );
-    
-    res.json({
-      success: true,
-      responseKeys: Object.keys(response.data),
-      responseType: typeof response.data,
-      fullResponse: response.data,
-      niftyType: typeof response.data.NIFTY,
-      niftyKeys: response.data.NIFTY ? Object.keys(response.data.NIFTY) : null
     });
   } catch (error) {
     res.status(500).json({
