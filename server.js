@@ -45,23 +45,32 @@ let closingData = {
   lastUpdate: null
 };
 
-// ========== MARKET HOURS CHECK ==========
+// ========== MARKET HOURS CHECK (FIXED FOR IST) ==========
 function isMarketHours() {
+  // Get current time in IST
   const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset);
+  const istTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
   
-  const hours = istTime.getUTCHours();
-  const minutes = istTime.getUTCMinutes();
-  const day = istTime.getUTCDay();
+  const day = istTime.getDay(); // 0 = Sunday, 6 = Saturday
+  const hours = istTime.getHours();
+  const minutes = istTime.getMinutes();
   
-  if (day === 0 || day === 6) return false;
+  // Weekend check
+  if (day === 0 || day === 6) {
+    console.log('❌ Market closed - Weekend');
+    return false;
+  }
   
+  // Convert to minutes since midnight
   const currentMinutes = hours * 60 + minutes;
-  const marketStart = 9 * 60 + 15;
-  const marketEnd = 15 * 60 + 30;
+  const marketStart = 9 * 60 + 15;  // 9:15 AM
+  const marketEnd = 15 * 60 + 30;    // 3:30 PM
   
-  return currentMinutes >= marketStart && currentMinutes <= marketEnd;
+  const isOpen = currentMinutes >= marketStart && currentMinutes <= marketEnd;
+  
+  console.log(`⏰ IST Time: ${hours}:${minutes < 10 ? '0' : ''}${minutes} | Market ${isOpen ? 'OPEN ✅' : 'CLOSED ❌'}`);
+  
+  return isOpen;
 }
 
 // ========== SESSION MANAGEMENT ==========
@@ -338,7 +347,7 @@ async function autoFetchMarketData() {
         closeDate: new Date().toLocaleDateString('en-IN'),
         lastUpdate: timestamp
       };
-      console.log(`✅ Market data updated - Indices: ${indices.length}, Gainers: ${gainers.length}, Losers: ${losers.length}`);
+      console.log(`✅ Market data updated - Indices: ${indices.length}, Gainers: ${gainers.length}, Losers: ${losers.length}, Active: ${active.length}`);
     }
     
     todayHistory.marketOpen = isMarketHours();
