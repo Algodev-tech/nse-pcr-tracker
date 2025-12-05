@@ -3,436 +3,543 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PCR Tracker - Live (Shared)</title>
-  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <title>PCR Tracker - Real-time NSE Data</title>
   <style>
-    :root {
-      --bg: #0a0e27; --surface: #1a1f3a; --surface-hover: #232a4a;
-      --text: #e8eaf6; --text-sec: #9fa8da; --primary: #2196f3;
-      --success: #4caf50; --danger: #f44336; --warning: #ff9800;
-      --border: #2d3454; --sidebar: 260px; --header: 64px;
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
     }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
-      font-family: 'Inter', sans-serif;
-      background: linear-gradient(135deg, var(--bg) 0%, #0d1229 100%);
-      color: var(--text); line-height: 1.6;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+      min-height: 100vh;
+      padding: 20px;
+      color: #fff;
     }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
     .header {
-      position: fixed; top: 0; left: 0; right: 0; height: var(--header);
-      background: var(--surface); border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; padding: 0 24px; z-index: 100;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      text-align: center;
+      margin-bottom: 30px;
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 15px;
+      backdrop-filter: blur(10px);
     }
-    .header-title {
-      font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 12px;
+
+    .header h1 {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
-    .header-title .material-icons { color: var(--primary); font-size: 28px; }
-    .header-actions { margin-left: auto; display: flex; gap: 16px; align-items: center; }
-    .status-badge {
-      padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 500;
-      display: flex; align-items: center; gap: 6px;
+
+    .status-bar {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 20px;
+      font-size: 0.95rem;
+      margin-top: 15px;
     }
-    .status-badge.live { background: rgba(76,175,80,0.15); color: var(--success); border: 1px solid var(--success); }
-    .status-badge.closed { background: rgba(244,67,54,0.15); color: var(--danger); border: 1px solid var(--danger); }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-    
-    .sidebar {
-      position: fixed; left: 0; top: var(--header); width: var(--sidebar);
-      height: calc(100vh - var(--header)); background: var(--surface);
-      border-right: 1px solid var(--border); padding: 24px 0; overflow-y: auto; z-index: 90;
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
     }
-    .sidebar-section { margin-bottom: 32px; }
-    .sidebar-section-title {
-      font-size: 12px; font-weight: 600; text-transform: uppercase;
-      color: var(--text-sec); padding: 0 24px; margin-bottom: 12px;
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
     }
-    .sidebar-item {
-      padding: 12px 24px; display: flex; align-items: center; gap: 12px;
-      color: var(--text); cursor: pointer; border-left: 3px solid transparent; transition: all 0.3s;
+
+    .status-dot.open {
+      background: #10b981;
+      box-shadow: 0 0 10px #10b981;
     }
-    .sidebar-item:hover { background: var(--surface-hover); border-left-color: var(--primary); }
-    .sidebar-item.active { background: rgba(33,150,243,0.1); border-left-color: var(--primary); color: var(--primary); }
-    
-    .main-content {
-      margin-left: var(--sidebar); margin-top: var(--header); padding: 32px;
-      min-height: calc(100vh - var(--header));
+
+    .status-dot.closed {
+      background: #ef4444;
+      box-shadow: 0 0 10px #ef4444;
     }
-    .symbol-tabs { display: flex; gap: 8px; margin-bottom: 24px; }
-    .symbol-tab {
-      padding: 12px 24px; background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s;
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
     }
-    .symbol-tab:hover { background: var(--surface-hover); }
-    .symbol-tab.active { background: var(--primary); border-color: var(--primary); color: white; }
-    
-    .stats-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 24px; margin-bottom: 32px;
+
+    .tabs {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 30px;
     }
-    .stat-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 12px; padding: 24px; transition: all 0.3s;
+
+    .tab-button {
+      padding: 12px 30px;
+      border: none;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 10px;
+      transition: all 0.3s;
     }
-    .stat-card:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
-    .stat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-    .stat-title { font-size: 13px; font-weight: 500; color: var(--text-sec); text-transform: uppercase; }
-    .stat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-    .stat-value { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
-    .stat-change { font-size: 14px; display: flex; align-items: center; gap: 4px; }
-    
-    .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 24px; margin-bottom: 32px; }
-    .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
-    .chart-title { font-size: 16px; font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
-    
-    .data-section {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 12px; overflow: hidden; margin-bottom: 32px;
+
+    .tab-button:hover {
+      background: rgba(255, 255, 255, 0.15);
+      transform: translateY(-2px);
     }
-    .section-header {
-      padding: 20px 24px; border-bottom: 1px solid var(--border);
-      display: flex; justify-content: space-between; align-items: center;
+
+    .tab-button.active {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
     }
-    .section-title { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-    .refresh-btn {
-      background: var(--primary); color: white; border: none; padding: 8px 16px;
-      border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;
-      font-size: 14px; transition: all 0.3s;
+
+    .summary-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
     }
-    .refresh-btn:hover { background: #1976d2; }
-    
-    .table-container { overflow-x: auto; max-height: 600px; overflow-y: auto; }
-    table { width: 100%; border-collapse: collapse; }
-    thead { background: rgba(33,150,243,0.05); position: sticky; top: 0; z-index: 10; }
+
+    .summary-card {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      padding: 25px;
+      border-radius: 15px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: all 0.3s;
+    }
+
+    .summary-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .summary-card h3 {
+      font-size: 0.9rem;
+      color: rgba(255, 255, 255, 0.7);
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .summary-card .value {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+
+    .summary-card .change {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    .change.positive {
+      color: #10b981;
+    }
+
+    .change.negative {
+      color: #ef4444;
+    }
+
+    .data-table {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      border-radius: 15px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .table-header {
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .table-header h2 {
+      font-size: 1.3rem;
+      color: #fff;
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    thead {
+      background: rgba(102, 126, 234, 0.2);
+    }
+
     th {
-      padding: 16px; text-align: left; font-size: 13px; font-weight: 600;
-      color: var(--text-sec); text-transform: uppercase; background: var(--surface);
+      padding: 15px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: rgba(255, 255, 255, 0.9);
+      border-bottom: 2px solid rgba(255, 255, 255, 0.1);
     }
-    td { padding: 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
-    tbody tr { transition: all 0.2s; }
-    tbody tr:hover { background: var(--surface-hover); }
-    
-    .time-cell { font-weight: 600; color: var(--primary); font-family: 'Courier New', monospace; }
-    .sentiment-cell {
-      padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 12px;
-      text-align: center; display: inline-block;
+
+    th:first-child {
+      border-top-left-radius: 10px;
     }
-    .sentiment-bullish { background: rgba(76,175,80,0.15); color: var(--success); border: 1px solid var(--success); }
-    .sentiment-bearish { background: rgba(244,67,54,0.15); color: var(--danger); border: 1px solid var(--danger); }
-    .sentiment-neutral { background: rgba(255,152,0,0.15); color: var(--warning); border: 1px solid var(--warning); }
-    
-    .loading { text-align: center; padding: 60px 20px; color: var(--text-sec); }
-    .loading .material-icons { font-size: 48px; animation: spin 1s linear infinite; }
-    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    
-    .row-count { font-size: 13px; color: var(--text-sec); margin-left: 8px; }
-    
-    @media (max-width: 968px) {
-      .sidebar { transform: translateX(-100%); }
-      .main-content { margin-left: 0; }
-      .stats-grid, .charts-grid { grid-template-columns: 1fr; }
+
+    th:last-child {
+      border-top-right-radius: 10px;
+    }
+
+    td {
+      padding: 15px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 0.9rem;
+    }
+
+    tbody tr {
+      transition: all 0.2s;
+    }
+
+    tbody tr:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .sentiment {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+
+    .sentiment.strong-bearish {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+      border: 1px solid #ef4444;
+    }
+
+    .sentiment.bearish {
+      background: rgba(249, 115, 22, 0.2);
+      color: #f97316;
+      border: 1px solid #f97316;
+    }
+
+    .sentiment.neutral {
+      background: rgba(59, 130, 246, 0.2);
+      color: #3b82f6;
+      border: 1px solid #3b82f6;
+    }
+
+    .sentiment.neutral-bullish {
+      background: rgba(34, 197, 94, 0.2);
+      color: #22c55e;
+      border: 1px solid #22c55e;
+    }
+
+    .sentiment.bullish {
+      background: rgba(16, 185, 129, 0.2);
+      color: #10b981;
+      border: 1px solid #10b981;
+    }
+
+    .sentiment.strong-bullish {
+      background: rgba(5, 150, 105, 0.2);
+      color: #059669;
+      border: 1px solid #059669;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .empty-state svg {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 20px;
+      opacity: 0.3;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      font-size: 1.1rem;
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    @media (max-width: 768px) {
+      .header h1 {
+        font-size: 1.8rem;
+      }
+
+      .summary-cards {
+        grid-template-columns: 1fr;
+      }
+
+      .tabs {
+        flex-direction: column;
+      }
+
+      .tab-button {
+        width: 100%;
+      }
+
+      table {
+        font-size: 0.8rem;
+      }
+
+      th, td {
+        padding: 10px 8px;
+      }
     }
   </style>
 </head>
 <body>
-  <header class="header">
-    <div class="header-title">
-      <span class="material-icons">show_chart</span>
-      PCR Tracker - Live (Shared)
-    </div>
-    <div class="header-actions">
-      <div class="status-badge live" id="market-status">
-        <span class="status-dot"></span>
-        <span id="status-text">Loading...</span>
-      </div>
-      <div id="last-update" style="font-size: 13px; color: var(--text-sec);"></div>
-    </div>
-  </header>
-
-  <aside class="sidebar">
-    <div class="sidebar-section">
-      <div class="sidebar-section-title">Analysis</div>
-      <div class="sidebar-item active"><span class="material-icons">dashboard</span><span>Overview</span></div>
-      <div class="sidebar-item"><span class="material-icons">timeline</span><span>Live Data</span></div>
-      <div class="sidebar-item"><span class="material-icons">insert_chart</span><span>Charts</span></div>
-    </div>
-  </aside>
-
-  <main class="main-content">
-    <div class="symbol-tabs">
-      <div class="symbol-tab active" data-symbol="NIFTY">NIFTY</div>
-      <div class="symbol-tab" data-symbol="BANKNIFTY">BANKNIFTY</div>
-    </div>
-
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-header">
-          <div class="stat-title">Latest PCR</div>
-          <div class="stat-icon" style="background: rgba(33,150,243,0.15); color: var(--primary);">
-            <span class="material-icons">trending_up</span>
-          </div>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>PCR Tracker - NSE Real-time</h1>
+      <div class="status-bar">
+        <div class="status">
+          <div class="status-dot" id="marketStatus"></div>
+          <span id="marketStatusText">Checking...</span>
         </div>
-        <div class="stat-value" id="stat-pcr">--</div>
-        <div class="stat-change" id="stat-pcr-change"></div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-header">
-          <div class="stat-title">Call OI</div>
-          <div class="stat-icon" style="background: rgba(244,67,54,0.15); color: var(--danger);">
-            <span class="material-icons">call_made</span>
-          </div>
+        <div class="status">
+          <span>Last updated: <strong id="lastUpdate">--:--:--</strong></span>
         </div>
-        <div class="stat-value" id="stat-call-oi">--</div>
-        <div class="stat-change" id="stat-call-change"></div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-header">
-          <div class="stat-title">Put OI</div>
-          <div class="stat-icon" style="background: rgba(76,175,80,0.15); color: var(--success);">
-            <span class="material-icons">call_received</span>
-          </div>
-        </div>
-        <div class="stat-value" id="stat-put-oi">--</div>
-        <div class="stat-change" id="stat-put-change"></div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-header">
-          <div class="stat-title">Index Price</div>
-          <div class="stat-icon" style="background: rgba(255,152,0,0.15); color: var(--warning);">
-            <span class="material-icons">currency_rupee</span>
-          </div>
-        </div>
-        <div class="stat-value" id="stat-price">--</div>
-        <div class="stat-change" id="stat-sentiment"></div>
       </div>
     </div>
 
-    <div class="charts-grid">
-      <div class="chart-card">
-        <div class="chart-title">
-          <span class="material-icons">show_chart</span>
-          PCR Trend (Today)
-        </div>
-        <canvas id="pcr-chart"></canvas>
-      </div>
-      <div class="chart-card">
-        <div class="chart-title">
-          <span class="material-icons">bar_chart</span>
-          OI Distribution
-        </div>
-        <canvas id="oi-chart"></canvas>
-      </div>
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-button active" onclick="switchTab('NIFTY')">NIFTY</button>
+      <button class="tab-button" onclick="switchTab('BANKNIFTY')">BANK NIFTY</button>
     </div>
 
-    <div class="data-section">
-      <div class="section-header">
-        <div class="section-title">
-          <span class="material-icons">table_chart</span>
-          Today's PCR Data (Shared for All Users)
-          <span class="row-count" id="row-count">(0 entries)</span>
-        </div>
-        <button class="refresh-btn" onclick="loadHistory()">
-          <span class="material-icons">refresh</span>
-          Refresh
-        </button>
+    <!-- Summary Cards -->
+    <div class="summary-cards" id="summaryCards">
+      <!-- Will be populated dynamically -->
+    </div>
+
+    <!-- Data Table -->
+    <div class="data-table">
+      <div class="table-header">
+        <h2 id="tableTitle">Intraday History</h2>
       </div>
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th><th>Call OI</th><th>Put OI</th><th>PCR</th><th>Vol PCR</th>
-              <th>Call Chg</th><th>Put Chg</th><th>Call Vol</th><th>Put Vol</th>
-              <th>Price</th><th>Sentiment</th>
-            </tr>
-          </thead>
-          <tbody id="table-body">
-            <tr>
-              <td colspan="11" class="loading">
-                <span class="material-icons">sync</span>
-                <div>Loading shared data from server...</div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="table-wrapper">
+        <div id="tableContent" class="loading">
+          Loading PCR data...
+        </div>
       </div>
     </div>
-  </main>
+  </div>
 
   <script>
-    const API_BASE = window.location.origin; // Same server
     let currentSymbol = 'NIFTY';
-    let allData = { NIFTY: [], BANKNIFTY: [], marketOpen: false };
-    let pcrChart = null, oiChart = null;
+    let pcrData = null;
 
-    function fmt(num) { return new Intl.NumberFormat('en-IN').format(num || 0); }
-    function fmtTime(timeString) {
-      const d = new Date(timeString);
-      return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    }
-    function getSentiment(pcr) {
-      if (pcr >= 1.25) return 'Strong Bullish';
-      if (pcr >= 1.10) return 'Bullish';
-      if (pcr >= 1.00) return 'Neutral-Bullish';
-      if (pcr >= 0.85) return 'Neutral';
-      if (pcr >= 0.75) return 'Neutral-Bearish';
-      if (pcr >= 0.60) return 'Bearish';
-      return 'Strong Bearish';
-    }
-    function getSentimentClass(s) {
-      if (s.includes('Bullish')) return 'sentiment-bullish';
-      if (s.includes('Bearish')) return 'sentiment-bearish';
-      return 'sentiment-neutral';
-    }
-
-    async function loadHistory() {
+    // Fetch PCR data
+    async function fetchPCRData() {
       try {
-        const res = await fetch(`${API_BASE}/api/history`);
-        const data = await res.json();
-        if (!data.success) throw new Error('API error');
+        const response = await fetch('/api/pcr/history');
+        const data = await response.json();
         
-        allData = data;
-        updateUI();
-        updateMarketStatus();
-      } catch (err) {
-        console.error(err);
-        showError();
+        if (data.success) {
+          pcrData = data;
+          updateUI();
+        }
+      } catch (error) {
+        console.error('Error fetching PCR data:', error);
+        document.getElementById('tableContent').innerHTML = `
+          <div class="empty-state">
+            <p>Error loading data. Please refresh the page.</p>
+          </div>
+        `;
       }
     }
 
+    // Switch between NIFTY and BANKNIFTY
+    function switchTab(symbol) {
+      currentSymbol = symbol;
+      
+      // Update tab buttons
+      document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      event.target.classList.add('active');
+      
+      updateUI();
+    }
+
+    // Update UI with latest data
     function updateUI() {
-      const history = allData[currentSymbol] || [];
-      if (history.length === 0) {
-        showEmpty();
+      if (!pcrData) return;
+      
+      const data = pcrData[currentSymbol];
+      const latestEntry = data[data.length - 1];
+      
+      // Update market status
+      const marketStatusDot = document.getElementById('marketStatus');
+      const marketStatusText = document.getElementById('marketStatusText');
+      
+      if (pcrData.marketOpen) {
+        marketStatusDot.className = 'status-dot open';
+        marketStatusText.textContent = 'Market Open';
+      } else {
+        marketStatusDot.className = 'status-dot closed';
+        marketStatusText.textContent = pcrData.frozen ? 'Market Closed (Frozen at 3:30 PM)' : 'Market Closed';
+      }
+      
+      // Update last update time
+      if (latestEntry) {
+        document.getElementById('lastUpdate').textContent = latestEntry.time;
+      }
+      
+      // Update summary cards
+      updateSummaryCards(latestEntry);
+      
+      // Update table
+      updateTable(data);
+    }
+
+    // Update summary cards
+    function updateSummaryCards(entry) {
+      if (!entry) {
+        document.getElementById('summaryCards').innerHTML = '';
         return;
       }
       
-      const latest = history[history.length - 1];
+      const changePercent = entry.pcr > 1 ? '+' + ((entry.pcr - 1) * 100).toFixed(2) + '%' : '-' + ((1 - entry.pcr) * 100).toFixed(2) + '%';
+      const changeClass = entry.pcr > 1 ? 'positive' : 'negative';
       
-      // Stats
-      document.getElementById('stat-pcr').textContent = latest.pcr.toFixed(2);
-      document.getElementById('stat-call-oi').textContent = fmt(latest.totalCallOI);
-      document.getElementById('stat-put-oi').textContent = fmt(latest.totalPutOI);
-      document.getElementById('stat-price').textContent = `₹${fmt(latest.underlyingValue)}`;
-      const sentiment = getSentiment(latest.pcr);
-      document.getElementById('stat-sentiment').innerHTML = `<span class="${getSentimentClass(sentiment)}">${sentiment}</span>`;
-      document.getElementById('stat-call-change').textContent = fmt(latest.callOIChange);
-      document.getElementById('stat-put-change').textContent = fmt(latest.putOIChange);
-      
-      // Table
-      const tbody = document.getElementById('table-body');
-      tbody.innerHTML = [...history].reverse().map(d => `
-        <tr>
-          <td class="time-cell">${fmtTime(d.time)}</td>
-          <td>${fmt(d.totalCallOI)}</td>
-          <td>${fmt(d.totalPutOI)}</td>
-          <td><strong>${d.pcr.toFixed(2)}</strong></td>
-          <td>${d.volumePCR.toFixed(2)}</td>
-          <td>${fmt(d.callOIChange)}</td>
-          <td>${fmt(d.putOIChange)}</td>
-          <td>${fmt(d.totalCallVolume)}</td>
-          <td>${fmt(d.totalPutVolume)}</td>
-          <td>₹${fmt(d.underlyingValue)}</td>
-          <td><span class="sentiment-cell ${getSentimentClass(getSentiment(d.pcr))}">${getSentiment(d.pcr)}</span></td>
-        </tr>
-      `).join('');
-      
-      document.getElementById('row-count').textContent = `(${history.length} ${history.length===1?'entry':'entries'})`;
-      document.getElementById('last-update').textContent = `Updated: ${new Date().toLocaleTimeString('en-IN')}`;
-      
-      updateCharts(history, latest);
-    }
-
-    function showEmpty() {
-      document.getElementById('table-body').innerHTML = `
-        <tr><td colspan="11" style="text-align:center; padding:60px 20px; color:var(--text-sec);">
-          <span class="material-icons" style="font-size:48px; opacity:0.3;">inbox</span>
-          <div style="margin-top:16px;">No data available for today</div>
-          <div style="font-size:13px; margin-top:8px;">Data will appear during market hours (09:15-15:30 IST)</div>
-        </td></tr>
+      document.getElementById('summaryCards').innerHTML = `
+        <div class="summary-card">
+          <h3>Current PCR</h3>
+          <div class="value">${entry.pcr}</div>
+          <div class="change ${changeClass}">${changePercent}</div>
+        </div>
+        <div class="summary-card">
+          <h3>Call OI</h3>
+          <div class="value">${formatNumber(entry.totalCallOI)}</div>
+          <div class="change">${formatNumber(entry.callOIChange)}</div>
+        </div>
+        <div class="summary-card">
+          <h3>Put OI</h3>
+          <div class="value">${formatNumber(entry.totalPutOI)}</div>
+          <div class="change">${formatNumber(entry.putOIChange)}</div>
+        </div>
+        <div class="summary-card">
+          <h3>Underlying Price</h3>
+          <div class="value">${entry.underlyingValue} <span style="font-size: 0.8rem;">NSE</span></div>
+          <div class="change">${entry.sentiment}</div>
+        </div>
       `;
     }
 
-    function showError() {
-      document.getElementById('table-body').innerHTML = `
-        <tr><td colspan="11" style="text-align:center; padding:60px 20px; color:var(--danger);">
-          <span class="material-icons" style="font-size:48px;">error_outline</span>
-          <div style="margin-top:16px;">Failed to load data</div>
-        </td></tr>
-      `;
-    }
-
-    function updateCharts(history, latest) {
-      const pcrCtx = document.getElementById('pcr-chart').getContext('2d');
-      if (pcrChart) pcrChart.destroy();
-      pcrChart = new Chart(pcrCtx, {
-        type: 'line',
-        data: {
-          labels: history.map(d => fmtTime(d.time)),
-          datasets: [{
-            label: 'PCR',
-            data: history.map(d => d.pcr),
-            borderColor: '#2196f3',
-            backgroundColor: 'rgba(33,150,243,0.1)',
-            tension: 0.4,
-            fill: true
-          }]
-        },
-        options: {
-          responsive: true,
-          plugins: { legend: { display: false } },
-          scales: {
-            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9fa8da' } },
-            x: { grid: { display: false }, ticks: { color: '#9fa8da', maxRotation: 45 } }
-          }
-        }
-      });
-
-      const oiCtx = document.getElementById('oi-chart').getContext('2d');
-      if (oiChart) oiChart.destroy();
-      oiChart = new Chart(oiCtx, {
-        type: 'doughnut',
-        data: {
-          labels: ['Call OI', 'Put OI'],
-          datasets: [{
-            data: [latest.totalCallOI, latest.totalPutOI],
-            backgroundColor: ['rgba(244,67,54,0.8)', 'rgba(76,175,80,0.8)'],
-            borderColor: ['#f44336', '#4caf50'],
-            borderWidth: 2
-          }]
-        },
-        options: {
-          responsive: true,
-          plugins: { legend: { position: 'bottom', labels: { color: '#e8eaf6' } } }
-        }
-      });
-    }
-
-    function updateMarketStatus() {
-      const badge = document.getElementById('market-status');
-      const text = document.getElementById('status-text');
-      if (allData.marketOpen) {
-        badge.className = 'status-badge live';
-        text.textContent = 'Market Open';
-      } else {
-        badge.className = 'status-badge closed';
-        text.textContent = 'Market Closed';
+    // Update table with PCR history
+    function updateTable(data) {
+      const tableContent = document.getElementById('tableContent');
+      
+      if (!data || data.length === 0) {
+        tableContent.innerHTML = `
+          <div class="empty-state">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+            </svg>
+            <h3>No data available yet</h3>
+            <p>PCR data will start appearing from 9:18 AM during market hours</p>
+          </div>
+        `;
+        return;
       }
+      
+      // Build table
+      let tableHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Call OI</th>
+              <th>Put OI</th>
+              <th>PCR</th>
+              <th>Volume PCR</th>
+              <th>Call Change</th>
+              <th>Put Change</th>
+              <th>Call Volume</th>
+              <th>Put Volume</th>
+              <th>Price</th>
+              <th>Sentiment</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+      
+      // Reverse to show latest first
+      const reversedData = [...data].reverse();
+      
+      reversedData.forEach(entry => {
+        const sentimentClass = entry.sentiment.toLowerCase().replace(/\s/g, '-');
+        
+        tableHTML += `
+          <tr>
+            <td><strong>${entry.time}</strong></td>
+            <td>${formatNumber(entry.totalCallOI)}</td>
+            <td>${formatNumber(entry.totalPutOI)}</td>
+            <td><strong>${entry.pcr}</strong></td>
+            <td>${entry.volumePCR}</td>
+            <td>${formatNumber(entry.callOIChange)}</td>
+            <td>${formatNumber(entry.putOIChange)}</td>
+            <td>${formatNumber(entry.totalCallVolume)}</td>
+            <td>${formatNumber(entry.totalPutVolume)}</td>
+            <td>₹${formatNumber(entry.underlyingValue)}</td>
+            <td><span class="sentiment ${sentimentClass}">${entry.sentiment}</span></td>
+          </tr>
+        `;
+      });
+      
+      tableHTML += `
+          </tbody>
+        </table>
+      `;
+      
+      tableContent.innerHTML = tableHTML;
+      
+      // Update table title
+      document.getElementById('tableTitle').textContent = `Intraday History (${data.length} entries)`;
     }
 
-    document.querySelectorAll('.symbol-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        document.querySelectorAll('.symbol-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        currentSymbol = tab.dataset.symbol;
-        updateUI();
-      });
-    });
+    // Format number with commas
+    function formatNumber(num) {
+      if (!num) return '0';
+      return num.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    }
 
-    loadHistory();
-    setInterval(loadHistory, 30000); // Refresh every 30s
+    // Initial fetch
+    fetchPCRData();
+    
+    // Auto-refresh every 30 seconds
+    setInterval(fetchPCRData, 30000);
   </script>
 </body>
 </html>
