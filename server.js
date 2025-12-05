@@ -209,9 +209,15 @@ async function fetchMarketIndices() {
   }
 }
 
-// ========== HELPER: Extract Array from Response ==========
+// ========== HELPER: Extract Array from Response (FINAL FIX) ==========
 function extractArrayFromResponse(responseData, logPrefix) {
   try {
+    // Handle string responses (NSE rate limiting)
+    if (typeof responseData === 'string') {
+      console.log(`${logPrefix} - Response is a string (likely rate limited):`, responseData);
+      return [];
+    }
+    
     // Log structure for debugging
     const keys = Object.keys(responseData);
     console.log(`${logPrefix} - Response has keys:`, keys.join(', '));
@@ -219,28 +225,44 @@ function extractArrayFromResponse(responseData, logPrefix) {
     // Try different possible locations
     let data = null;
     
-    // Check if response.NIFTY exists and what it contains
+    // Method 1: Check if response.data exists and is an array
+    if (responseData.data) {
+      if (Array.isArray(responseData.data)) {
+        console.log(`${logPrefix} - Found array at root.data`);
+        return responseData.data;
+      } else if (typeof responseData.data === 'string') {
+        console.log(`${logPrefix} - root.data is a string (rate limited)`);
+        return [];
+      }
+    }
+    
+    // Method 2: Check if response.NIFTY exists
     if (responseData.NIFTY) {
       console.log(`${logPrefix} - NIFTY exists, type:`, typeof responseData.NIFTY);
       
       if (Array.isArray(responseData.NIFTY)) {
         data = responseData.NIFTY;
-      } else if (typeof responseData.NIFTY === 'object') {
-        // NIFTY is an object, look for arrays inside it
-        const niftyKeys = Object.keys(responseData.NIFTY);
-        console.log(`${logPrefix} - NIFTY object keys:`, niftyKeys.join(', '));
-        
-        for (let key of niftyKeys) {
-          if (Array.isArray(responseData.NIFTY[key])) {
-            console.log(`${logPrefix} - Found array in NIFTY.${key}`);
-            data = responseData.NIFTY[key];
-            break;
+      } else if (typeof responseData.NIFTY === 'object' && responseData.NIFTY !== null) {
+        // NIFTY is an object, look for data inside it
+        if (responseData.NIFTY.data && Array.isArray(responseData.NIFTY.data)) {
+          console.log(`${logPrefix} - Found array in NIFTY.data`);
+          data = responseData.NIFTY.data;
+        } else {
+          const niftyKeys = Object.keys(responseData.NIFTY);
+          console.log(`${logPrefix} - NIFTY object keys:`, niftyKeys.join(', '));
+          
+          for (let key of niftyKeys) {
+            if (Array.isArray(responseData.NIFTY[key])) {
+              console.log(`${logPrefix} - Found array in NIFTY.${key}`);
+              data = responseData.NIFTY[key];
+              break;
+            }
           }
         }
       }
     }
     
-    // If still no data, check root level for arrays
+    // Method 3: If still no data, check root level for arrays
     if (!data) {
       for (let key of keys) {
         if (Array.isArray(responseData[key])) {
@@ -258,7 +280,7 @@ function extractArrayFromResponse(responseData, logPrefix) {
   }
 }
 
-// ========== FETCH TOP GAINERS (IMPROVED) ==========
+// ========== FETCH TOP GAINERS (FINAL) ==========
 async function fetchTopGainers() {
   try {
     const cookies = await ensureSession();
@@ -300,7 +322,7 @@ async function fetchTopGainers() {
   }
 }
 
-// ========== FETCH TOP LOSERS (IMPROVED) ==========
+// ========== FETCH TOP LOSERS (FINAL) ==========
 async function fetchTopLosers() {
   try {
     const cookies = await ensureSession();
@@ -342,7 +364,7 @@ async function fetchTopLosers() {
   }
 }
 
-// ========== FETCH MOST ACTIVE (IMPROVED) ==========
+// ========== FETCH MOST ACTIVE (FINAL) ==========
 async function fetchMostActive() {
   try {
     const cookies = await ensureSession();
@@ -552,9 +574,9 @@ app.get('/api/debug/gainers', async (req, res) => {
       success: true,
       responseKeys: Object.keys(response.data),
       responseType: typeof response.data,
-      fullResponse: response.data,
       niftyType: typeof response.data.NIFTY,
-      niftyKeys: response.data.NIFTY ? Object.keys(response.data.NIFTY) : null
+      niftyKeys: response.data.NIFTY ? Object.keys(response.data.NIFTY) : null,
+      sampleData: response.data.NIFTY?.data?.slice(0, 2) || null
     });
   } catch (error) {
     res.status(500).json({
