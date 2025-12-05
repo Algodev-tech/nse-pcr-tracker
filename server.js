@@ -209,7 +209,7 @@ async function fetchMarketIndices() {
   }
 }
 
-// ========== FETCH TOP GAINERS ==========
+// ========== FETCH TOP GAINERS (FIXED) ==========
 async function fetchTopGainers() {
   try {
     const cookies = await ensureSession();
@@ -228,7 +228,19 @@ async function fetchTopGainers() {
       }
     );
     
-    const data = response.data.NIFTY || [];
+    // Handle different response formats
+    let data = response.data.NIFTY || response.data.data || [];
+    
+    // Ensure data is an array
+    if (!Array.isArray(data)) {
+      console.log('Gainers data is not an array:', typeof data);
+      return [];
+    }
+    
+    if (data.length === 0) {
+      console.log('No gainers data available yet');
+      return [];
+    }
     
     return data.slice(0, 10).map(stock => ({
       symbol: stock.symbol,
@@ -244,7 +256,7 @@ async function fetchTopGainers() {
   }
 }
 
-// ========== FETCH TOP LOSERS ==========
+// ========== FETCH TOP LOSERS (FIXED) ==========
 async function fetchTopLosers() {
   try {
     const cookies = await ensureSession();
@@ -263,7 +275,19 @@ async function fetchTopLosers() {
       }
     );
     
-    const data = response.data.NIFTY || [];
+    // Handle different response formats
+    let data = response.data.NIFTY || response.data.data || [];
+    
+    // Ensure data is an array
+    if (!Array.isArray(data)) {
+      console.log('Losers data is not an array:', typeof data);
+      return [];
+    }
+    
+    if (data.length === 0) {
+      console.log('No losers data available yet');
+      return [];
+    }
     
     return data.slice(0, 10).map(stock => ({
       symbol: stock.symbol,
@@ -279,7 +303,7 @@ async function fetchTopLosers() {
   }
 }
 
-// ========== FETCH MOST ACTIVE ==========
+// ========== FETCH MOST ACTIVE (FIXED) ==========
 async function fetchMostActive() {
   try {
     const cookies = await ensureSession();
@@ -298,7 +322,19 @@ async function fetchMostActive() {
       }
     );
     
-    const data = response.data.NIFTY || [];
+    // Handle different response formats
+    let data = response.data.NIFTY || response.data.data || [];
+    
+    // Ensure data is an array
+    if (!Array.isArray(data)) {
+      console.log('Most active data is not an array:', typeof data);
+      return [];
+    }
+    
+    if (data.length === 0) {
+      console.log('No most active data available yet');
+      return [];
+    }
     
     return data.slice(0, 10).map(stock => ({
       symbol: stock.symbol,
@@ -547,6 +583,32 @@ app.get('/api/market/active', (req, res) => {
     lastUpdate: data.lastUpdate,
     marketOpen: isOpen
   });
+});
+
+// Manual trigger endpoint for testing/forcing updates
+app.get('/api/trigger/fetch', async (req, res) => {
+  console.log('🔄 Manual fetch triggered');
+  
+  try {
+    await autoFetchMarketData();
+    
+    res.json({
+      success: true,
+      message: 'Data fetch triggered',
+      marketOpen: isMarketHours(),
+      dataFetched: {
+        indices: marketData.indices.length,
+        gainers: marketData.gainers.length,
+        losers: marketData.losers.length,
+        mostActive: marketData.mostActive.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // ========== CRON JOBS ==========
