@@ -673,6 +673,42 @@ app.get('/api/trigger/fetch', async (req, res) => {
   }
 });
 
+
+// ========== DEBUG ENDPOINT - Check NSE Response ==========
+app.get('/api/debug/gainers', async (req, res) => {
+  try {
+    const cookies = await ensureSession();
+    if (!cookies) throw new Error('No valid session');
+    
+    const response = await axios.get(
+      'https://www.nseindia.com/api/live-analysis-variations?index=gainers',
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Cookie': cookies,
+          'Referer': 'https://www.nseindia.com'
+        },
+        timeout: 10000
+      }
+    );
+    
+    res.json({
+      success: true,
+      responseKeys: Object.keys(response.data),
+      responseType: typeof response.data,
+      fullResponse: response.data,
+      niftyType: typeof response.data.NIFTY,
+      niftyKeys: response.data.NIFTY ? Object.keys(response.data.NIFTY) : null
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // ========== CRON JOBS ==========
 
 // Fetch market data every 1 minute
