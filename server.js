@@ -214,7 +214,7 @@ function extractArrayFromResponse(responseData, logPrefix) {
   try {
     // Handle string responses (NSE rate limiting)
     if (typeof responseData === 'string') {
-      console.log(`${logPrefix} - Response is a string (likely rate limited):`, responseData);
+      console.log(`${logPrefix} - Response is a string (rate limited):`, responseData);
       return [];
     }
     
