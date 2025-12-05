@@ -459,27 +459,36 @@ app.get('/api/pcr/:symbol', async (req, res) => {
   }
 });
 
-// Get all market data - REAL-TIME
+// Get all market data - REAL-TIME (FIXED)
 app.get('/api/market/overview', (req, res) => {
   const isOpen = isMarketHours();
+  todayHistory.marketOpen = isOpen; // Update the flag
+  
   let data;
   
-  if (isOpen && marketData.indices.length > 0) {
-    // Live market data
-    data = { ...marketData, marketOpen: true, dataType: 'live' };
-  } else if (closingData.indices.length > 0) {
-    // Closing snapshot
-    data = { ...closingData, marketOpen: false, dataType: 'closing' };
+  if (isOpen) {
+    // Market is OPEN - use live data if available, otherwise use closing
+    if (marketData.indices.length > 0) {
+      data = { ...marketData, marketOpen: true, dataType: 'live' };
+    } else if (closingData.indices.length > 0) {
+      data = { ...closingData, marketOpen: true, dataType: 'closing-live' };
+    } else {
+      data = {
+        indices: [],
+        gainers: [],
+        losers: [],
+        mostActive: [],
+        lastUpdate: null,
+        marketOpen: true,
+        dataType: 'waiting'
+      };
+    }
   } else {
-    // No data available
-    data = {
-      indices: [],
-      gainers: [],
-      losers: [],
-      mostActive: [],
-      lastUpdate: null,
-      marketOpen: false,
-      dataType: 'none'
+    // Market is CLOSED - use closing snapshot
+    data = { 
+      ...closingData, 
+      marketOpen: false, 
+      dataType: 'closing' 
     };
   }
   
@@ -497,38 +506,46 @@ app.get('/api/market/closing', (req, res) => {
 });
 
 app.get('/api/market/indices', (req, res) => {
-  const data = todayHistory.marketOpen && marketData.indices.length > 0 ? marketData : closingData;
+  const isOpen = isMarketHours();
+  const data = isOpen && marketData.indices.length > 0 ? marketData : closingData;
   res.json({
     success: true,
     indices: data.indices,
-    lastUpdate: data.lastUpdate
+    lastUpdate: data.lastUpdate,
+    marketOpen: isOpen
   });
 });
 
 app.get('/api/market/gainers', (req, res) => {
-  const data = todayHistory.marketOpen && marketData.gainers.length > 0 ? marketData : closingData;
+  const isOpen = isMarketHours();
+  const data = isOpen && marketData.gainers.length > 0 ? marketData : closingData;
   res.json({
     success: true,
     gainers: data.gainers,
-    lastUpdate: data.lastUpdate
+    lastUpdate: data.lastUpdate,
+    marketOpen: isOpen
   });
 });
 
 app.get('/api/market/losers', (req, res) => {
-  const data = todayHistory.marketOpen && marketData.losers.length > 0 ? marketData : closingData;
+  const isOpen = isMarketHours();
+  const data = isOpen && marketData.losers.length > 0 ? marketData : closingData;
   res.json({
     success: true,
     losers: data.losers,
-    lastUpdate: data.lastUpdate
+    lastUpdate: data.lastUpdate,
+    marketOpen: isOpen
   });
 });
 
 app.get('/api/market/active', (req, res) => {
-  const data = todayHistory.marketOpen && marketData.mostActive.length > 0 ? marketData : closingData;
+  const isOpen = isMarketHours();
+  const data = isOpen && marketData.mostActive.length > 0 ? marketData : closingData;
   res.json({
     success: true,
     mostActive: data.mostActive,
-    lastUpdate: data.lastUpdate
+    lastUpdate: data.lastUpdate,
+    marketOpen: isOpen
   });
 });
 
