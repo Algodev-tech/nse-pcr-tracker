@@ -15,120 +15,200 @@ app.use(express.static('public'));
 let sessionData = {
   cookies: null,
   timestamp: null,
-  ttl: 4 * 60 * 1000 // Increased to 4 minutes
+  ttl: 5 * 60 * 1000,
+  consecutiveFailures: 0
 };
+
+// Request queue to prevent hammering NSE
+let lastRequestTime = 0;
+const MIN_REQUEST_GAP = 8000; // 8 seconds between requests
+
+async function waitForRateLimit() {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  
+  if (timeSinceLastRequest < MIN_REQUEST_GAP) {
+    const waitTime = MIN_REQUEST_GAP - timeSinceLastRequest;
+    console.log(`⏳ Rate limiting: waiting ${Math.round(waitTime/1000)}s...`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  
+  lastRequestTime = Date.now();
+}
 
 async function initializeNSESession(forceRefresh = false) {
   const now = Date.now();
   
   if (!forceRefresh && sessionData.cookies && (now - sessionData.timestamp) < sessionData.ttl) {
+    console.log('♻️ Reusing existing session');
     return sessionData.cookies;
   }
   
   try {
-    console.log('🔄 Getting NSE session...');
+    console.log('🔄 Establishing NEW session...');
     
-    // Step 1: Visit homepage with realistic browser headers
+    await waitForRateLimit();
+    
+    // Step 1: GET homepage
     const homeResponse = await axios.get('https://www.nseindia.com', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
+        'authority': 'www.nseindia.com',
+        'method': 'GET',
+        'path': '/',
+        'scheme': 'https',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
+        'Cache-Control': 'max-age=0',
+        'Priority': 'u=0, i',
+        'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'none',
         'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0'
+        'Upgrade-Insecure-Requests': '1',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
       },
-      timeout: 20000,
-      maxRedirects: 5
+      timeout: 30000,
+      maxRedirects: 5,
+      validateStatus: (status) => status >= 200 && status < 500
     });
     
-    const cookies = homeResponse.headers['set-cookie'];
-    if (!cookies) throw new Error('No cookies received from NSE');
+    if (homeResponse.status !== 200) {
+      throw new Error(`Homepage returned ${homeResponse.status}`);
+    }
     
-    // Longer delay to simulate human behavior
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    const cookies = homeResponse.headers['set-cookie'];
+    if (!cookies || cookies.length === 0) {
+      throw new Error('No cookies received from homepage');
+    }
+    
+    console.log(`📦 Received ${cookies.length} cookies`);
+    
+    // Human-like delay
+    await new Promise(resolve => setTimeout(resolve, 4000));
     
     const cookieString = cookies.map(c => c.split(';')[0]).join('; ');
     
-    // Step 2: Visit option-chain page
-    await axios.get('https://www.nseindia.com/option-chain', {
+    await waitForRateLimit();
+    
+    // Step 2: GET /get-quotes/derivatives (intermediate page)
+    await axios.get('https://www.nseindia.com/get-quotes/derivatives?symbol=NIFTY', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
         'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'en-US,en;q=0.9',
         'Cookie': cookieString,
-        'Referer': 'https://www.nseindia.com',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
+        'Referer': 'https://www.nseindia.com/',
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'same-origin',
-        'Cache-Control': 'max-age=0'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
       },
-      timeout: 20000
+      timeout: 30000,
+      validateStatus: () => true
     });
     
-    // Another delay
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    await waitForRateLimit();
+    
+    // Step 3: GET option-chain page
+    await axios.get('https://www.nseindia.com/option-chain', {
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cookie': cookieString,
+        'Referer': 'https://www.nseindia.com/',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+      },
+      timeout: 30000
+    });
+    
     await new Promise(resolve => setTimeout(resolve, 2000));
     
     sessionData.cookies = cookieString;
     sessionData.timestamp = now;
+    sessionData.consecutiveFailures = 0;
     
-    console.log('✅ Session ready');
+    console.log('✅ Session established successfully');
     return cookieString;
     
   } catch (error) {
-    console.error('❌ Session error:', error.message);
+    sessionData.consecutiveFailures++;
+    console.error(`❌ Session error (failure #${sessionData.consecutiveFailures}):`, error.message);
     throw error;
   }
 }
 
-async function fetchOptionChain(symbol, retries = 3) {
+async function fetchOptionChain(symbol, retries = 2) {
+  
+  // If too many failures, wait longer
+  if (sessionData.consecutiveFailures >= 3) {
+    const waitTime = 60000; // 1 minute
+    console.log(`⚠️ Too many failures. Cooling down for ${waitTime/1000}s...`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+    sessionData.consecutiveFailures = 0;
+  }
+  
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const cookies = await initializeNSESession(attempt > 1);
       
-      // Longer delay between attempts
-      await new Promise(resolve => setTimeout(resolve, 4000));
+      await waitForRateLimit();
       
       const url = `https://www.nseindia.com/api/option-chain-indices?symbol=${symbol}`;
       
+      console.log(`🎯 Fetching ${symbol} option chain (attempt ${attempt}/${retries})...`);
+      
       const response = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/javascript, */*; q=0.01',
-          'Accept-Language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept': '*/*',
           'Accept-Encoding': 'gzip, deflate, br',
+          'Accept-Language': 'en-US,en;q=0.9',
           'Cookie': cookies,
           'Referer': 'https://www.nseindia.com/option-chain',
-          'X-Requested-With': 'XMLHttpRequest',
-          'Connection': 'keep-alive',
           'Sec-Fetch-Dest': 'empty',
           'Sec-Fetch-Mode': 'cors',
-          'Sec-Fetch-Site': 'same-origin'
+          'Sec-Fetch-Site': 'same-origin',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          'X-Requested-With': 'XMLHttpRequest'
         },
-        timeout: 25000
+        timeout: 30000,
+        validateStatus: (status) => status >= 200 && status < 500
       });
       
+      if (response.status === 403) {
+        throw new Error('403 Forbidden - IP may be blocked');
+      }
+      
+      if (response.status !== 200) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
       if (response.data && response.data.records) {
-        console.log(`✅ ${symbol} data fetched (attempt ${attempt})`);
+        sessionData.consecutiveFailures = 0;
+        console.log(`✅ ${symbol} data fetched successfully`);
         return response.data;
       }
       
       throw new Error('Invalid response structure');
       
     } catch (error) {
-      console.log(`❌ Attempt ${attempt}/${retries} failed for ${symbol}: ${error.message}`);
-      if (attempt === retries) throw error;
+      sessionData.consecutiveFailures++;
+      console.log(`❌ ${symbol} attempt ${attempt}/${retries} failed: ${error.message}`);
       
-      // Exponential backoff with jitter
-      const delay = (attempt * 6000) + Math.random() * 2000;
+      if (attempt === retries) {
+        throw error;
+      }
+      
+      const delay = 15000 + (Math.random() * 5000);
       console.log(`⏳ Waiting ${Math.round(delay/1000)}s before retry...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
@@ -182,52 +262,43 @@ function isMarketOpen() {
 
 async function autoFetchJob() {
   if (!isMarketOpen()) {
-    console.log('🔴 Market closed - skipping');
+    console.log('🔴 Market closed');
     return;
   }
   
-  console.log('\n🤖 AUTO-FETCH STARTED');
-  console.log('Time:', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
+  console.log('\n' + '='.repeat(50));
+  console.log('🤖 AUTO-FETCH | ' + new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
+  console.log('='.repeat(50));
   
-  const symbols = ['NIFTY', 'BANKNIFTY'];
-  
-  for (const symbol of symbols) {
+  for (const symbol of ['NIFTY', 'BANKNIFTY']) {
     try {
-      console.log(`\n📊 Fetching ${symbol}...`);
       const data = await fetchOptionChain(symbol);
       const pcr = calculatePCR(data);
       
-      console.log(`   ✅ PCR: ${pcr.pcr}`);
-      console.log(`   💰 Price: ₹${pcr.underlyingValue.toLocaleString('en-IN')}`);
+      console.log(`\n${symbol}:`);
+      console.log(`  PCR: ${pcr.pcr}`);
+      console.log(`  Price: ₹${pcr.underlyingValue.toLocaleString('en-IN')}`);
+      console.log(`  Vol PCR: ${pcr.volumePCR}`);
       
-      // Longer delay between symbols
-      await new Promise(resolve => setTimeout(resolve, 5000));
     } catch (error) {
-      console.error(`❌ ${symbol} failed:`, error.message);
+      console.error(`\n❌ ${symbol} FAILED: ${error.message}`);
     }
   }
   
-  console.log('\n✅ AUTO-FETCH COMPLETED\n');
+  console.log('\n' + '='.repeat(50) + '\n');
 }
 
-// Reduced frequency to avoid rate limiting
 cron.schedule('*/5 * * * *', () => {
-  if (isMarketOpen()) {
-    autoFetchJob();
-  }
-}, {
-  timezone: 'Asia/Kolkata'
-});
+  if (isMarketOpen()) autoFetchJob();
+}, { timezone: 'Asia/Kolkata' });
 
-console.log('⏰ Scheduler set up - runs every 5 min during market hours');
-
-// API ENDPOINTS
+// API
 app.get('/', (req, res) => {
   res.json({
     status: '🟢 LIVE',
-    service: 'NSE PCR Tracker',
     marketOpen: isMarketOpen(),
-    timestamp: new Date().toISOString()
+    failures: sessionData.consecutiveFailures,
+    sessionAge: sessionData.timestamp ? Math.floor((Date.now() - sessionData.timestamp) / 1000) : null
   });
 });
 
@@ -235,8 +306,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     uptime: Math.floor(process.uptime()),
-    marketOpen: isMarketOpen(),
-    sessionAge: sessionData.timestamp ? Math.floor((Date.now() - sessionData.timestamp) / 1000) : 0
+    marketOpen: isMarketOpen()
   });
 });
 
@@ -244,44 +314,20 @@ app.get('/api/pcr/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   
   if (!['NIFTY', 'BANKNIFTY'].includes(symbol)) {
-    return res.status(400).json({ error: 'Invalid symbol', validSymbols: ['NIFTY', 'BANKNIFTY'] });
+    return res.status(400).json({ error: 'Invalid symbol' });
   }
   
   try {
     const data = await fetchOptionChain(symbol);
     const pcr = calculatePCR(data);
-    
-    res.json({
-      success: true,
-      symbol,
-      ...pcr,
-      fetchedAt: new Date().toISOString()
-    });
+    res.json({ success: true, symbol, ...pcr, fetchedAt: new Date().toISOString() });
   } catch (error) {
-    console.error(`API Error for ${symbol}:`, error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      symbol
-    });
-  }
-});
-
-app.post('/api/trigger', async (req, res) => {
-  try {
-    await autoFetchJob();
-    res.json({ success: true, message: 'Manual fetch completed', timestamp: new Date().toISOString() });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: error.message, symbol });
   }
 });
 
 app.listen(PORT, () => {
-  console.log('\n' + '='.repeat(70));
-  console.log('🚀 NSE PCR TRACKER');
-  console.log('='.repeat(70));
+  console.log('\n🚀 NSE PCR TRACKER');
   console.log(`📍 Port: ${PORT}`);
-  console.log(`🔴 Market: ${isMarketOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
-  console.log(`⏰ Auto-fetch: Every 5 min (market hours only)`);
-  console.log('='.repeat(70) + '\n');
+  console.log(`🔴 Market: ${isMarketOpen() ? 'OPEN ✅' : 'CLOSED ❌'}\n`);
 });
