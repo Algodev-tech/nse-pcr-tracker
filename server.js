@@ -10,7 +10,6 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(compression());
 app.use(express.json());
-// Serve static files (dashboard)
 app.use(express.static('public'));
 
 let sessionData = {
@@ -134,38 +133,6 @@ function calculatePCR(data) {
   };
 }
 
-// ---------- SHEETS PUSH (NOW DISABLED – LEFT FOR REFERENCE) ----------
-
-async function pushToGoogleSheets(symbol, pcrData) {
-  // This function is kept for reference but effectively disabled.
-  // Apps Script now pulls data from /api/pcr instead of this server pushing.
-  
-  if (!GOOGLE_SHEETS_WEBHOOK) {
-    console.log('⚠️ No Google Sheets webhook set (push disabled, using Apps Script pull)');
-    return false;
-  }
-
-  // If you ever want to re‑enable server‑side push, uncomment this block.
-  /*
-  try {
-    await axios.post(GOOGLE_SHEETS_WEBHOOK, {
-      symbol,
-      ...pcrData,
-      timestamp: new Date().toISOString()
-    });
-    console.log(`✅ Pushed ${symbol} to Google Sheets`);
-    return true;
-  } catch (error) {
-    console.error('❌ Sheets error:', error.message);
-    return false;
-  }
-  */
-
-  return false;
-}
-
-// --------------------------------------------------------------------
-
 function isMarketOpen() {
   const now = new Date();
   const hour = now.getUTCHours() + 5;
@@ -200,13 +167,6 @@ async function autoFetchJob() {
       console.log(`   PCR: ${pcr.pcr}`);
       console.log(`   Price: ₹${pcr.underlyingValue.toLocaleString('en-IN')}`);
       
-      // OLD BEHAVIOUR: push to Google Sheets
-      // await pushToGoogleSheets(symbol, pcr);
-
-      // NEW BEHAVIOUR:
-      // Do not push to Sheets here.
-      // Google Apps Script now pulls from /api/pcr/:symbol and writes to the sheet.
-
       await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (error) {
       console.error(`❌ ${symbol} failed:`, error.message);
