@@ -15,50 +15,74 @@ app.use(express.static('public'));
 let sessionData = {
   cookies: null,
   timestamp: null,
-  ttl: 3 * 60 * 1000
+  ttl: 5 * 60 * 1000 // 5 minutes
 };
 
-const GOOGLE_SHEETS_WEBHOOK = process.env.SHEETS_WEBHOOK || null;
+// Rotate User-Agents to avoid detection
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15'
+];
+
+function getRandomUserAgent() {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+function randomDelay(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
 
 async function initializeNSESession(forceRefresh = false) {
   const now = Date.now();
   
   if (!forceRefresh && sessionData.cookies && (now - sessionData.timestamp) < sessionData.ttl) {
+    console.log('♻️ Reusing session');
     return sessionData.cookies;
   }
   
   try {
-    console.log('🔄 Getting NSE session...');
+    console.log('🔄 Getting NEW NSE session...');
+    
+    const userAgent = getRandomUserAgent();
     
     const homeResponse = await axios.get('https://www.nseindia.com', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': userAgent,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Connection': 'keep-alive'
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
       },
-      timeout: 15000
+      timeout: 20000
     });
     
     const cookies = homeResponse.headers['set-cookie'];
     if (!cookies) throw new Error('No cookies received');
     
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Random delay 2-4 seconds
+    await new Promise(resolve => setTimeout(resolve, randomDelay(2000, 4000)));
     
     const cookieString = cookies.map(c => c.split(';')[0]).join('; ');
     
     await axios.get('https://www.nseindia.com/option-chain', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': userAgent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Cookie': cookieString,
-        'Referer': 'https://www.nseindia.com'
-      }
+        'Referer': 'https://www.nseindia.com',
+        'Connection': 'keep-alive'
+      },
+      timeout: 20000
     });
     
     sessionData.cookies = cookieString;
     sessionData.timestamp = now;
     
-    console.log('✅ Session ready');
+    console.log('✅ Session established');
     return cookieString;
     
   } catch (error) {
@@ -67,36 +91,45 @@ async function initializeNSESession(forceRefresh = false) {
   }
 }
 
-async function fetchOptionChain(symbol, retries = 3) {
+async function fetchOptionChain(symbol, retries = 2) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const cookies = await initializeNSESession(attempt > 1);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Random delay 3-6 seconds
+      await new Promise(resolve => setTimeout(resolve, randomDelay(3000, 6000)));
       
       const url = `https://www.nseindia.com/api/option-chain-indices?symbol=${symbol}`;
+      const userAgent = getRandomUserAgent();
       
       const response = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': userAgent,
           'Accept': '*/*',
+          'Accept-Language': 'en-US,en;q=0.9',
           'Cookie': cookies,
           'Referer': 'https://www.nseindia.com/option-chain',
-          'X-Requested-With': 'XMLHttpRequest'
+          'X-Requested-With': 'XMLHttpRequest',
+          'Connection': 'keep-alive'
         },
-        timeout: 20000
+        timeout: 25000
       });
       
       if (response.data && response.data.records) {
-        console.log(`✅ ${symbol} data fetched`);
+        console.log(`✅ ${symbol} fetched (attempt ${attempt})`);
         return response.data;
       }
       
       throw new Error('Invalid response');
       
     } catch (error) {
-      console.log(`❌ Attempt ${attempt} failed for ${symbol}`);
+      console.log(`❌ ${symbol} attempt ${attempt} failed: ${error.message}`);
       if (attempt === retries) throw error;
-      await new Promise(resolve => setTimeout(resolve, attempt * 3000));
+      
+      // Longer backoff with randomness
+      const backoff = randomDelay(8000, 12000);
+      console.log(`⏳ Waiting ${Math.round(backoff/1000)}s...`);
+      await new Promise(resolve => setTimeout(resolve, backoff));
     }
   }
 }
@@ -135,126 +168,92 @@ function calculatePCR(data) {
 
 function isMarketOpen() {
   const now = new Date();
-  const hour = now.getUTCHours() + 5;
-  const minute = now.getUTCMinutes() + 30;
-  const day = now.getUTCDay();
-  
-  const isWeekday = day >= 1 && day <= 5;
-  const currentMinutes = hour * 60 + minute;
+  const istOffset = 5.5 * 60;
+  const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const totalMinutes = utcMinutes + istOffset;
+  const istDayIndex = (now.getUTCDay() + (totalMinutes >= 24 * 60 ? 1 : 0)) % 7;
+  const istMinutes = totalMinutes % (24 * 60);
+  const isWeekday = istDayIndex >= 1 && istDayIndex <= 5;
   const marketOpen = 9 * 60 + 15;
   const marketClose = 15 * 60 + 30;
-  
-  return isWeekday && currentMinutes >= marketOpen && currentMinutes <= marketClose;
+  return isWeekday && istMinutes >= marketOpen && istMinutes <= marketClose;
 }
 
 async function autoFetchJob() {
   if (!isMarketOpen()) {
-    console.log('🔴 Market is closed - skipping');
+    console.log('🔴 Market closed');
     return;
   }
   
-  console.log('\n🤖 AUTO-FETCH STARTED');
-  console.log('Time:', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
+  console.log('\n🤖 AUTO-FETCH | ' + new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
   
-  const symbols = ['NIFTY', 'BANKNIFTY'];
-  
-  for (const symbol of symbols) {
+  for (const symbol of ['NIFTY', 'BANKNIFTY']) {
     try {
-      console.log(`\n📊 Fetching ${symbol}...`);
       const data = await fetchOptionChain(symbol);
       const pcr = calculatePCR(data);
+      console.log(`${symbol}: PCR ${pcr.pcr}, Price ₹${pcr.underlyingValue.toLocaleString('en-IN')}`);
       
-      console.log(`   PCR: ${pcr.pcr}`);
-      console.log(`   Price: ₹${pcr.underlyingValue.toLocaleString('en-IN')}`);
-      
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Random delay between symbols
+      await new Promise(resolve => setTimeout(resolve, randomDelay(4000, 7000)));
     } catch (error) {
-      console.error(`❌ ${symbol} failed:`, error.message);
+      console.error(`❌ ${symbol}:`, error.message);
     }
   }
-  
-  console.log('\n✅ AUTO-FETCH COMPLETED\n');
 }
 
-cron.schedule('*/5 * * * *', () => {
+// Fetch every 5 minutes (but add jitter)
+cron.schedule('*/5 * * * *', async () => {
   if (isMarketOpen()) {
+    // Add 0-60 second random jitter
+    const jitter = randomDelay(0, 60000);
+    console.log(`⏱️ Jitter: ${Math.round(jitter/1000)}s`);
+    await new Promise(resolve => setTimeout(resolve, jitter));
     autoFetchJob();
   }
-}, {
-  timezone: 'Asia/Kolkata'
-});
-
-console.log('⏰ Scheduler set up - runs every 5 min during market hours');
+}, { timezone: 'Asia/Kolkata' });
 
 app.get('/', (req, res) => {
   res.json({
     status: '🟢 LIVE',
-    service: 'NSE PCR Cloud Tracker',
     marketOpen: isMarketOpen(),
-    info: 'Auto-fetches data every 5 minutes during market hours (9:15-15:30 IST)',
-    endpoints: {
-      health: 'GET /health',
-      pcr: 'GET /api/pcr/:symbol',
-      trigger: 'POST /api/trigger'
-    }
+    sessionAge: sessionData.timestamp ? Math.floor((Date.now() - sessionData.timestamp) / 1000) : null
   });
-});
-
-app.get('/ping', (req, res) => {
-  res.send('OK');
 });
 
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
-    uptime: Math.floor(process.uptime()) + ' seconds',
-    marketOpen: isMarketOpen(),
-    timestamp: new Date().toISOString()
+    uptime: Math.floor(process.uptime()),
+    marketOpen: isMarketOpen()
   });
 });
 
 app.get('/api/pcr/:symbol', async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
-  const validSymbols = ['NIFTY', 'BANKNIFTY'];
   
-  if (!validSymbols.includes(symbol)) {
-    return res.status(400).json({ error: 'Invalid symbol', validSymbols });
+  if (!['NIFTY', 'BANKNIFTY'].includes(symbol)) {
+    return res.status(400).json({ error: 'Invalid symbol' });
   }
   
   try {
     const data = await fetchOptionChain(symbol);
     const pcr = calculatePCR(data);
-    
-    res.json({
-      success: true,
-      symbol,
-      ...pcr,
-      fetchedAt: new Date().toISOString()
-    });
+    res.json({ success: true, symbol, ...pcr, fetchedAt: new Date().toISOString() });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      symbol
-    });
+    res.status(500).json({ success: false, error: error.message, symbol });
   }
 });
 
 app.post('/api/trigger', async (req, res) => {
   try {
     await autoFetchJob();
-    res.json({ success: true, message: 'Manual fetch completed' });
+    res.json({ success: true, message: 'Completed' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log('\n' + '='.repeat(70));
-  console.log('🚀 NSE PCR CLOUD TRACKER');
-  console.log('='.repeat(70));
-  console.log(`📍 Running on port: ${PORT}`);
-  console.log(`🔴 Market status: ${isMarketOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
-  console.log(`⏰ Auto-fetch: Every 5 min (only during market hours)`);
-  console.log('='.repeat(70) + '\n');
+  console.log(`\n🚀 PCR TRACKER on port ${PORT}`);
+  console.log(`Market: ${isMarketOpen() ? 'OPEN ✅' : 'CLOSED ❌'}\n`);
 });
